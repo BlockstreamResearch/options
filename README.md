@@ -1,2 +1,2 @@
-# options
+# Options
 Options on elements/liquid
