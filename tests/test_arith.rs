@@ -169,8 +169,8 @@ fn test_arith() {
     println!("{}", serialize_hex(&tx));
     let tx: Transaction =
         deserialize(&Vec::<u8>::from_hex(res["hex"].as_str().unwrap()).unwrap()).unwrap();
-    assert!(cl.test_mempool_accept(&tx));
-    cl.send_raw_transaction(&tx);
+    // assert!(cl.test_mempool_accept(&tx));
+    // cl.send_raw_transaction(&tx);
 
     // try to verify the surjection proof here
     // {
@@ -185,12 +185,13 @@ fn test_arith() {
     //     assert!(prf.verify(&secp, tx.output[0].asset.commitment().unwrap(), &domain));
     // }
     // cl.test_mempool_accept(&tx);
-    // let txid = cl.send_raw_transaction(&tx);
-    // cl.generate(1);
-    // dbg!(cl.call(
-    //     "gettransaction",
-    //     &[txid.to_hex().into()],
-    // ));
+    let txid = cl.send_raw_transaction(&tx);
+    cl.generate(1);
+    println!("{}", serialize_hex(&tx));
+    dbg!(cl.call(
+        "gettransaction",
+        &[txid.to_hex().into()],
+    ));
     // println!("{}", base64::encode(&serialize(&pset)));
     // let pset = cl.wallet_process_psbt(&pset, /*sign*/ true);
     // println!("{}", base64::encode(&serialize(&pset)));
