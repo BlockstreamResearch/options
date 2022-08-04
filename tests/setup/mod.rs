@@ -1,20 +1,20 @@
 pub extern crate options;
 
 pub extern crate elements_miniscript as miniscript;
-use elementsd::bitcoincore_rpc::jsonrpc::base64;
-use miniscript::elements::encode::serialize;
-use miniscript::elements::{AssetId, Transaction};
-use miniscript::{bitcoin, elements};
 use std::str::FromStr;
 
 use elements::encode::{deserialize, serialize_hex};
 use elements::hashes::hex::FromHex;
 use elements::pset::PartiallySignedTransaction as Psbt;
 use elements::BlockHash;
+use elementsd::bitcoincore_rpc::jsonrpc::base64;
 use elementsd::bitcoincore_rpc::jsonrpc::serde_json::{json, Value};
 use elementsd::bitcoind::bitcoincore_rpc::RpcApi;
 use elementsd::bitcoind::{self, BitcoinD};
 use elementsd::ElementsD;
+use miniscript::elements::encode::serialize;
+use miniscript::elements::{AssetId, Transaction};
+use miniscript::{bitcoin, elements};
 
 // We are not using pegins right now, but it might be required in case in future
 // if we extend the tests to check pegins etc.

@@ -2,12 +2,11 @@
 use std::str::FromStr;
 
 use miniscript::bitcoin::{self, XOnlyPublicKey};
-use miniscript::elements::confidential::AssetBlindingFactor;
+use miniscript::elements::confidential::{AssetBlindingFactor, ValueBlindingFactor};
 use miniscript::elements::hashes::Hash;
 // use miniscript::elements::hashes::Hash;
 use miniscript::elements::secp256k1_zkp::{Secp256k1, Signing};
-use miniscript::elements::{confidential, OutPoint};
-use miniscript::elements::{AssetId, ContractHash};
+use miniscript::elements::{confidential, Address, AssetId, ContractHash, OutPoint};
 
 /// The high level user parameters to the options contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -139,6 +138,21 @@ impl OptionsContract {
     }
 }
 
+/// Parameters to be used when funding a new options contract
+#[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
+pub struct FundingParams {
+    /// The crt prevout
+    pub crt_prevout: OutPoint,
+    /// The ort prevout
+    pub ort_prevout: OutPoint,
+    /// The number of contracts to fund
+    pub num_contracts: u64,
+    /// Ort destination address
+    pub ort_dest_addr: Address,
+    /// Crt destination address
+    pub crt_dest_addr: Address,
+}
+
 /// Returns a tuple:
 /// - The asset ID when issuing asset from issuing input and contract hash
 /// - The re-issuance token from input and contract hash
@@ -156,7 +170,7 @@ fn new_issuance(
 }
 
 /// Implementations of fixed constants for [`AssetBlindingFactor`]
-pub trait AbfConsts {
+pub trait Consts {
     /// Returns the abf corresponding to scalar 1
     fn one() -> Self;
 
@@ -164,7 +178,7 @@ pub trait AbfConsts {
     fn two() -> Self;
 }
 
-impl AbfConsts for AssetBlindingFactor {
+impl Consts for AssetBlindingFactor {
     fn one() -> Self {
         let mut one = [0u8; 32];
         one[31] = 1;
@@ -175,5 +189,19 @@ impl AbfConsts for AssetBlindingFactor {
         let mut two = [0u8; 32];
         two[31] = 2;
         AssetBlindingFactor::from_slice(&two).expect("Valid scalar")
+    }
+}
+
+impl Consts for ValueBlindingFactor {
+    fn one() -> Self {
+        let mut one = [0u8; 32];
+        one[31] = 1;
+        ValueBlindingFactor::from_slice(&one).expect("Valid scalar")
+    }
+
+    fn two() -> Self {
+        let mut two = [0u8; 32];
+        two[31] = 2;
+        ValueBlindingFactor::from_slice(&two).expect("Valid scalar")
     }
 }

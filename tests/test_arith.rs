@@ -3,10 +3,15 @@
 //! Arith expression fragment integration tests
 //!
 
+use std::collections::BTreeMap;
 use std::str::FromStr;
 
+use elements::pset::PartiallySignedTransaction as Psbt;
+use elements::{pset as psbt, OutPoint, TxOut, Txid};
 use elements_miniscript as miniscript;
 use elementsd::bitcoincore_rpc::jsonrpc::base64;
+use elementsd::ElementsD;
+use miniscript::bitcoin;
 use miniscript::bitcoin::Amount;
 use miniscript::elements::confidential::{AssetBlindingFactor, ValueBlindingFactor};
 use miniscript::elements::encode::{deserialize, serialize, serialize_hex};
@@ -14,11 +19,6 @@ use miniscript::elements::hashes::hex::{FromHex, ToHex};
 use miniscript::elements::secp256k1_zkp::rand::thread_rng;
 use miniscript::elements::secp256k1_zkp::Secp256k1;
 use miniscript::elements::{self, AssetId, Transaction, TxOutSecrets};
-
-use elements::pset::PartiallySignedTransaction as Psbt;
-use elements::{pset as psbt, OutPoint, TxOut, Txid};
-use elementsd::ElementsD;
-use miniscript::bitcoin;
 use options::OptionsExt;
 mod setup;
 use setup::Call;
@@ -58,15 +58,15 @@ fn get_unspent(
     panic!("Cannot fund pset with two seperate utxos: Wallet must have atleast two utxos")
 }
 
-pub fn funded_pset(cl: &ElementsD, btc_asset: AssetId) -> (Psbt, Vec<TxOutSecrets>) {
+pub fn funded_pset(cl: &ElementsD, btc_asset: AssetId) -> (Psbt, BTreeMap<usize, TxOutSecrets>) {
     let unspent = get_unspent(cl, btc_asset, 2);
     let mut pset = Psbt::new_v2();
     let mut in_total = 0u64;
-    let mut secrets = vec![];
-    for (inp, secret) in unspent {
+    let mut secrets = BTreeMap::new();
+    for (i, (inp, secret)) in unspent.into_iter().enumerate() {
         pset.add_input(inp);
         in_total += secret.value;
-        secrets.push(secret);
+        secrets.insert(i, secret);
     }
     dbg!(in_total);
     let fees = 1_000; // random fixed value for fees.
@@ -122,7 +122,7 @@ fn test_arith() {
     let secp = Secp256k1::new();
 
     let _contract = pset
-        .issue_rts(&secp, &mut thread_rng(), opt_params, &txout_secrets)
+        .issue_rts_with_blinds(&secp, &mut thread_rng(), opt_params, &txout_secrets)
         .unwrap();
     // pset.outputs_mut()[2].blinder_index = Some(0);
     // pset.outputs_mut()[3].blinder_index = Some(0);
@@ -131,7 +131,7 @@ fn test_arith() {
     // pset.outputs_mut()[3].blinding_key = pset.outputs_mut()[0].blinding_key;
 
     println!("{}", base64::encode(&serialize(&pset)));
-    let mut tx = pset.extract_tx().unwrap();
+    let tx = pset.extract_tx().unwrap();
     // testing scope
     // {
     //     tx.input.push(tx.input[0].clone());
@@ -160,8 +160,6 @@ fn test_arith() {
     //     tx.verify_tx_amt_proofs(&secp, &spent_utxos).unwrap();
     // }
     // dbg!(&tx.input);
-    tx.input[0].has_issuance = true;
-    tx.input[1].has_issuance = true;
     let res = cl.call(
         "signrawtransactionwithwallet",
         &[serialize(&tx).to_hex().into()],
@@ -169,8 +167,8 @@ fn test_arith() {
     println!("{}", serialize_hex(&tx));
     let tx: Transaction =
         deserialize(&Vec::<u8>::from_hex(res["hex"].as_str().unwrap()).unwrap()).unwrap();
-    // assert!(cl.test_mempool_accept(&tx));
-    // cl.send_raw_transaction(&tx);
+    assert!(cl.test_mempool_accept(&tx));
+    cl.send_raw_transaction(&tx);
 
     // try to verify the surjection proof here
     // {
@@ -185,13 +183,13 @@ fn test_arith() {
     //     assert!(prf.verify(&secp, tx.output[0].asset.commitment().unwrap(), &domain));
     // }
     // cl.test_mempool_accept(&tx);
-    let txid = cl.send_raw_transaction(&tx);
-    cl.generate(1);
-    println!("{}", serialize_hex(&tx));
-    dbg!(cl.call(
-        "gettransaction",
-        &[txid.to_hex().into()],
-    ));
+    // let txid = cl.send_raw_transaction(&tx);
+    // cl.generate(1);
+    // println!("{}", serialize_hex(&tx));
+    // dbg!(cl.call(
+    //     "gettransaction",
+    //     &[txid.to_hex().into()],
+    // ));
     // println!("{}", base64::encode(&serialize(&pset)));
     // let pset = cl.wallet_process_psbt(&pset, /*sign*/ true);
     // println!("{}", base64::encode(&serialize(&pset)));

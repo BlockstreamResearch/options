@@ -2,7 +2,6 @@
 //! The variable names are same as of the document for ease of review
 use std::sync::Arc;
 
-use crate::contract::{BaseParams, OptionsContract};
 /// (Mini)Scripts related to covenants
 use miniscript::{
     self,
@@ -19,6 +18,8 @@ use miniscript::{
     extensions::CovExtArgs,
     CovenantExt, Tap,
 };
+
+use crate::contract::{BaseParams, OptionsContract};
 
 /// type alias for miniscript with Tap script Ms with extensions
 type MsTap = miniscript::Miniscript<XOnlyPublicKey, Tap, CovenantExt<CovExtArgs>>;
@@ -225,4 +226,86 @@ fn op_return() -> Script {
 fn asset_hex(assetid: AssetId) -> String {
     let bytes = serialize(&Asset::Explicit(assetid));
     bytes.to_hex()
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    use miniscript::elements::{taproot::LeafVersion, AddressParams, Txid};
+    use std::str::FromStr;
+
+    #[test]
+    fn test_cov_desc() {
+        const PARAMS: &'static AddressParams = &AddressParams::ELEMENTS; // edit this to liquid if needed
+                                                                         // edit these as you need them
+        let params = BaseParams {
+            contract_size: 100_000,
+            expiry: 1659640176, // UNIX timestamp
+            start: 1659640076,
+            strike_price: 20_000,
+            coll_asset: AssetId::from_str(
+                "3d8f49e01b8b2eab8bae136c9c0db8f0c6dce48cdeac3f3784b7af2844d523c8",
+            )
+            .unwrap(), // Note that asset id is parsed reverse as per elements convention
+            settle_asset: AssetId::from_str(
+                "cc4b500625764881971716718c9305da17363e4e97b6bcd26b30c9627dbe3868",
+            )
+            .unwrap(), //
+        };
+        let crt_rt_issue_prevout = OutPoint {
+            txid: Txid::from_str(
+                "5efe259e7b13724eb89ab0ee71739cdeeb04c6fb18d2851385c621902ee9cb94",
+            )
+            .unwrap(), // parsed reverse as per convention
+            vout: 0,
+        };
+        let ort_rt_issue_prevout = OutPoint {
+            txid: Txid::from_str(
+                "5efe259e7b13724eb89ab0ee71739cdeeb04c6fb18d2851385c621902ee9cb94",
+            )
+            .unwrap(), // parsed reverse as per convention
+            vout: 1,
+        };
+
+        let secp = Secp256k1::new();
+        let (rt_desc, contract) =
+            params.funding_desc(&secp, crt_rt_issue_prevout, ort_rt_issue_prevout);
+
+        let coll_desc = contract.coll_desc();
+        let settle_desc = contract.settle_desc();
+
+        let arr = [
+            ("ORT/CRT RT Descriptor", rt_desc),
+            ("Settlement Descriptor", settle_desc),
+        ];
+
+        fn print_control_blk(desc: &TrDesc, ms: &MsTap, name: &str) {
+            let blk = desc
+                .spend_info()
+                .control_block(&(ms.encode(), LeafVersion::default()))
+                .unwrap();
+            println!(
+                "Control block for {} script : {} ",
+                name,
+                blk.serialize().to_hex()
+            );
+        }
+
+        for (name, desc) in arr {
+            println!("Address for {} : {}", name, desc.address(None, &PARAMS));
+            println!("Scriptpubkey for {} : {:x}", name, desc.script_pubkey());
+            for (_, script) in desc.iter_scripts() {
+                print_control_blk(&desc, script, name)
+            }
+            println!("\n"); // skip couple of lines
+        }
+        let coll_addr = coll_desc.address(None, &PARAMS);
+        println!("Addr for Collateral desc : {}", coll_addr);
+        println!("Spk for Collateral desc : {:x}", coll_desc.script_pubkey());
+
+        print_control_blk(&coll_desc, &contract.cancel_ms(), "cancel");
+        print_control_blk(&coll_desc, &contract.exec_ms(), "exec");
+        print_control_blk(&coll_desc, &contract.expiry_ms(), "expiry");
+    }
 }
