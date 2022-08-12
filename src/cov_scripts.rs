@@ -256,10 +256,14 @@ pub(crate) fn translate_xpk_desc_pubkey(desc: TrDesc) -> Descriptor<DescriptorPu
 #[cfg(test)]
 mod tests {
 
-    use crate::BaseParams;
+    use crate::{contract::Consts, BaseParams};
 
     use super::*;
-    use miniscript::elements::{taproot::LeafVersion, AddressParams, OutPoint, Txid};
+    use miniscript::elements::{
+        confidential::{AssetBlindingFactor, ValueBlindingFactor},
+        taproot::LeafVersion,
+        AddressParams, OutPoint, Txid,
+    };
     use std::str::FromStr;
 
     #[test]
@@ -334,5 +338,76 @@ mod tests {
         print_control_blk(&coll_desc, &contract.cancel_ms(), "cancel");
         print_control_blk(&coll_desc, &contract.exec_ms(), "exec");
         print_control_blk(&coll_desc, &contract.expiry_ms(), "expiry");
+    }
+
+    #[test]
+    fn test_asset_blinders() {
+        let assetid =
+            AssetId::from_str("0d427836e46e919653de03f0820e41b223af045a560f677f9f7b0a4b49181688")
+                .unwrap();
+        let abf = AssetBlindingFactor::one(); // can also be AssetBlindingFactor::two()
+
+        let secp = Secp256k1::new();
+        let conf_asset = Asset::new_confidential(&secp, assetid, abf);
+        println!("{}", conf_asset.to_string());
+    }
+
+    #[test]
+    fn compute_last_factor() {
+        let secp = Secp256k1::new();
+        let abfs_in = [
+            "8987fdb72abbb9e267be82199a48ef532fb611399a459f5fae09894f2dc0af38",
+            "110ac9e9b32a4c0bb7adfb4b1ddf6109265884c228e0d145ef22b9e9be679b52",
+            "475523cfb711a46402da784a295fab089bcfa3e6bec7a5c9314c6f85ea867c5f",
+        ];
+        let abfs_in = abfs_in
+            .iter()
+            .map(|x| AssetBlindingFactor::from_str(x).unwrap())
+            .collect::<Vec<_>>();
+        let vbfs_in = [
+            "3f8dc7822008d6a6a68e02427467a6491456fde62e0c7ce9644f334c6a73dfea",
+            "3cb0b8d900c6594c6c070c487fd881b7d89700395766f48a8b663543c67c0388",
+            "ea553ebf571bbd6dde5eb7d0820569aa1f105741057b03ae426f45ac7ff7da13",
+        ];
+        let vbfs_in = vbfs_in
+            .iter()
+            .map(|x| ValueBlindingFactor::from_str(x).unwrap())
+            .collect::<Vec<_>>();
+        let values_in = [1u64, 1, 98567];
+
+        let last_value = 97567;
+        let last_abf = AssetBlindingFactor::from_str(
+            "32f0f4d5b4c7f68a5408e64e6f773154e9b1968e6ef0ec2e4e49c0a7d0d51e2b",
+        )
+        .unwrap();
+
+        let abfs_out = [AssetBlindingFactor::one(), AssetBlindingFactor::one()];
+        let vbfs_out = [ValueBlindingFactor::zero(), ValueBlindingFactor::zero()];
+        let values_out = [1u64, 1];
+
+        let mut inputs = vec![];
+        for i in 0..values_in.len() {
+            inputs.push((values_in[i], abfs_in[i], vbfs_in[i]));
+        }
+
+        let mut outputs = vec![];
+        for i in 0..values_out.len() {
+            outputs.push((values_out[i], abfs_out[i], vbfs_out[i]));
+        }
+
+        let last_vbf = ValueBlindingFactor::last(&secp, last_value, last_abf, &inputs, &outputs);
+        println!("{}", last_vbf);
+
+        // Dummy test with values all inputs abfs/vbfs/values as 1, output abfs as one, vbfs zero.
+        let one_abf = AssetBlindingFactor::one();
+        let one_vbf = ValueBlindingFactor::one();
+        let zero_vbf = ValueBlindingFactor::zero();
+        dbg!(ValueBlindingFactor::last(
+            &secp,
+            1,
+            one_abf,
+            &[(1, one_abf, one_vbf); 3],
+            &[(1, one_abf, zero_vbf); 2]
+        ));
     }
 }
