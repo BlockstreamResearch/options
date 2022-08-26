@@ -1,0 +1,21 @@
+[package]
+name = "options-lib"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+elements-miniscript={git = "https://github.com/sanket1729/elements-miniscript", branch="new_cov_frags_followup"}
+elements = {git = "https://github.com/sanket1729/rust-elements", branch = "blind_cleanups", features=["serde-feature"]}
+
+
+# Do NOT use this as a feature! Use the `serde` feature instead.
+actual-serde = { package = "serde", version = "1.0.140", features =["derive"], optional = true }
+
+[dev-dependencies]
+elementsd = {version = "0.5.0"}
+actual-rand = { package = "rand", version = "0.8.4"}
+
+[features]
+serde = ["actual-serde", "elements-miniscript/serde"]

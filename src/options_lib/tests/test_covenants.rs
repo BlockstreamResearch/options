@@ -20,9 +20,9 @@ use miniscript::elements::hashes::hex::{FromHex, ToHex};
 use miniscript::elements::secp256k1_zkp::rand::thread_rng;
 use miniscript::elements::secp256k1_zkp::Secp256k1;
 use miniscript::elements::{self, AddressParams, AssetId, Script, Transaction, TxOutSecrets};
-use options::OptionsExt;
+use options_lib::OptionsExt;
 mod setup;
-use options::contract::{CovUserParams, FundingParams};
+use options_lib::contract::{CovUserParams, FundingParams};
 use setup::Call;
 
 fn get_unspent(
@@ -148,10 +148,10 @@ fn swap_pset(pset: &mut Psbt, target_pos: usize, asset: AssetId, spk: &Script) {
 fn test_covenants() {
     let (cl, _, _genesis_hash, btc_asset_id) = &setup::setup(false);
     let usd_asset = setup_wallet(cl);
-    let (pset, txout_secrets) = funded_pset(cl, *btc_asset_id);
+    let (pset, _txout_secrets) = funded_pset(cl, *btc_asset_id);
 
     let mut pset = cl.utxo_update_psbt(&pset);
-    let opt_params = options::BaseParams {
+    let opt_params = options_lib::BaseParams {
         contract_size: 1000_000,
         expiry: 1659127125, // timestamp ~friday 2pm PST
         start: 1659141525,  // timestamp ~friday 11am PST
@@ -162,20 +162,20 @@ fn test_covenants() {
     let secp = Secp256k1::new();
 
     let contract = pset
-        .issue_rts_with_blinds(&secp, &mut thread_rng(), opt_params, &txout_secrets)
+        .issue_rts(&secp, &mut thread_rng(), opt_params)
         .unwrap();
 
-    let tx = pset.extract_tx().unwrap();
+    let pset = cl.wallet_process_psbt(&pset, true);
 
-    let res = cl.call(
-        "signrawtransactionwithwallet",
-        &[serialize(&tx).to_hex().into()],
-    );
-
-    let issue_tx: Transaction =
-        deserialize(&Vec::<u8>::from_hex(res["hex"].as_str().unwrap()).unwrap()).unwrap();
-    assert!(cl.test_mempool_accept(&issue_tx));
+    let issue_tx = cl.finalize_psbt(&pset);
     let issue_txid = cl.send_raw_transaction(&issue_tx);
+    cl.generate(6);
+    assert!(cl.get_num_confirmations(issue_txid) > 0);
+
+    // let issue_tx: Transaction =
+    //     deserialize(&Vec::<u8>::from_hex(res["hex"].as_str().unwrap()).unwrap()).unwrap();
+    // assert!(cl.test_mempool_accept(&issue_tx));
+    // let issue_txid = cl.send_raw_transaction(&issue_tx);
 
     //------------------------------- RT tokens issued---------------------------
     let crt_addr = cl.get_new_address();
@@ -204,18 +204,23 @@ fn test_covenants() {
 
     swap_pset(&mut pset, 0, *btc_asset_id, &cov_addr.script_pubkey());
 
-    let mut txout_secrets = get_pset_txout_secrets(cl, &pset);
-    pset.fund_contract_with_blinds(&secp, &mut thread_rng(), contract, &mut txout_secrets, &fund_params).unwrap();
+    // let mut txout_secrets = get_pset_txout_secrets(cl, &pset);
+    // pset.fund_contract_with_blinds(&secp, &mut thread_rng(), contract, &mut txout_secrets, &fund_params).unwrap();
 
 
-    let tx = pset.extract_tx().unwrap();
-    let res = cl.call(
-        "signrawtransactionwithwallet",
-        &[serialize(&tx).to_hex().into()],
-    );
+    // let tx = pset.extract_tx().unwrap();
+    // let res = cl.call(
+    //     "signrawtransactionwithwallet",
+    //     &[serialize(&tx).to_hex().into()],
+    // );
 
-    let fund_tx: Transaction =
-        deserialize(&Vec::<u8>::from_hex(res["hex"].as_str().unwrap()).unwrap()).unwrap();
+    // let fund_tx: Transaction =
+    //     deserialize(&Vec::<u8>::from_hex(res["hex"].as_str().unwrap()).unwrap()).unwrap();
+
+    pset.fund_contract(&secp, &mut thread_rng(), contract, &fund_params).unwrap();
+    let pset = cl.wallet_process_psbt(&pset, true);
+
+    let fund_tx = cl.finalize_psbt(&pset);
 
     assert!(cl.test_mempool_accept(&fund_tx));
     let fund_txid = cl.send_raw_transaction(&fund_tx);

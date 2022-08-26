@@ -1,5 +1,3 @@
-pub extern crate options;
-
 pub extern crate elements_miniscript as miniscript;
 use std::str::FromStr;
 

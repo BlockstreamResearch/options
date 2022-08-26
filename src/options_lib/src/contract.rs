@@ -1,6 +1,8 @@
 //! Create a call option on Elements
 use std::str::FromStr;
 
+use elements::encode::Encodable;
+use elements::hashes::HashEngine;
 use miniscript::bitcoin::{self, XOnlyPublicKey};
 use miniscript::elements::confidential::{AssetBlindingFactor, ValueBlindingFactor};
 use miniscript::elements::hashes::{sha256, Hash};
@@ -9,6 +11,11 @@ use miniscript::elements::{confidential, Address, AssetId, ContractHash, OutPoin
 
 /// The high level user parameters to the options contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(crate::serde::Serialize, crate::serde::Deserialize)
+)]
+#[cfg_attr(feature = "serde", serde(crate = "actual_serde"))]
 pub struct BaseParams {
     /// The contract size in sats per contract. 1M sat per contract
     pub contract_size: u64,
@@ -24,8 +31,26 @@ pub struct BaseParams {
     pub settle_asset: AssetId,
 }
 
+impl BaseParams {
+
+    /// Add the information of BaseParams to HashEngine
+    fn id(&self, mut engine: &mut sha256::HashEngine)  {
+        self.contract_size.consensus_encode(&mut engine).unwrap();
+        self.expiry.consensus_encode(&mut engine).unwrap();
+        self.start.consensus_encode(&mut engine).unwrap();
+        self.strike_price.consensus_encode(&mut engine).unwrap();
+        self.coll_asset.consensus_encode(&mut engine).unwrap();
+        self.settle_asset.consensus_encode(&mut engine).unwrap();
+    }
+}
+
 /// Tokens required for claiming associated assets
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(crate::serde::Serialize, crate::serde::Deserialize)
+)]
+#[cfg_attr(feature = "serde", serde(crate = "actual_serde"))]
 pub struct OptionsContract {
     /// Crt re-issuance token
     crt_rt: AssetId,
@@ -154,6 +179,17 @@ impl OptionsContract {
     /// Required while re-issuing assets
     pub fn ort_reissue_entropy(&self) -> sha256::Midstate {
         self.ort_reissue_entropy
+    }
+
+    /// Returns the contract hash of this [`OptionsContract`].
+    pub fn id(&self) -> sha256::Hash {
+        let mut engine = sha256::Hash::engine();
+        self.params.id(&mut engine);
+        engine.input(&self.crt_rt.into_inner());
+        engine.input(&self.ort_rt.into_inner());
+        engine.input(&self.crt.into_inner());
+        engine.input(&self.ort.into_inner());
+        sha256::Hash::from_engine(engine)
     }
 }
 
