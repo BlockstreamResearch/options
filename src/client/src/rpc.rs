@@ -532,7 +532,15 @@ impl RpcCall for Client {
             });
             out_arr.push(obj);
         }
-        let value = self.call_rpc("walletcreatefundedpsbt", &[json!([]), out_arr.into(), 0.into(), json!({"fee_rate": "1.0"})]);
+        let value = self.call_rpc(
+            "walletcreatefundedpsbt",
+            &[
+                json!([]),
+                out_arr.into(),
+                0.into(),
+                json!({"fee_rate": "1.0", "include_unsafe": true}),
+            ],
+        );
         let pset_base64 = value["psbt"].as_str().unwrap().to_string();
         deserialize(&base64::decode(&pset_base64).unwrap()).unwrap()
     }
