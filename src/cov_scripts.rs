@@ -38,7 +38,7 @@ impl BaseParams {
     ) -> (TrDesc, OptionsContract) {
         let contract = OptionsContract::new(*self, crt_prevout, ort_prevout);
         // Same variables from the scratchpad doc
-        let a1 = "num64_eq(inp_v(0),out_v(0))";
+        let a1 = "num64_eq  (inp_v(0),out_v(0))";
         let a2 = "num64_eq(inp_v(1),out_v(1))";
         let a3 = format!("and_v(v:{},{})", a1, a2);
 
@@ -100,13 +100,12 @@ impl OptionsContract {
     /// correctly enforced in the covenant
     fn coll_change_e7(&self) -> String {
         let sz = self.params().contract_size;
-        let e1 = format!("num64_gt(curr_inp_v,mul({},out_v(0)))", sz);
         let e2 = format!("num64_eq(out_v(2),sub(curr_inp_v,mul({},out_v(0))))", sz);
 
         let e3 = "asset_eq(curr_inp_asset,out_asset(2))";
         let e4 = "spk_eq(curr_inp_spk,out_spk(2))";
 
-        let e5 = format!("and_v(v:{},and_v(v:{},and_v(v:{},{})))", e1, e2, e3, e4);
+        let e5 = format!("and_v(v:{},and_v(v:{},{})))", e2, e3, e4);
         let e6 = format!("num64_eq(curr_inp_v,mul({},out_v(0)))", sz);
 
         let e7 = format!("or_b(l:{},a:{})", e5, e6);
