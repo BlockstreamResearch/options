@@ -32,9 +32,8 @@ pub struct BaseParams {
 }
 
 impl BaseParams {
-
     /// Add the information of BaseParams to HashEngine
-    fn id(&self, mut engine: &mut sha256::HashEngine)  {
+    fn id(&self, mut engine: &mut sha256::HashEngine) {
         self.contract_size.consensus_encode(&mut engine).unwrap();
         self.expiry.consensus_encode(&mut engine).unwrap();
         self.start.consensus_encode(&mut engine).unwrap();

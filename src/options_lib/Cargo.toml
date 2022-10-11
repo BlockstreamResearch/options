@@ -7,7 +7,7 @@ edition = "2018"
 
 [dependencies]
 elements-miniscript={git = "https://github.com/sanket1729/elements-miniscript", branch="new_cov_frags_followup"}
-elements = {git = "https://github.com/sanket1729/rust-elements", branch = "blind_cleanups", features=["serde-feature"]}
+elements = {git = "https://github.com/sanket1729/rust-elements", branch = "blind_cleanups_new", features=["serde-feature"]}
 
 
 # Do NOT use this as a feature! Use the `serde` feature instead.
