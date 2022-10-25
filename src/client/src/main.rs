@@ -5,12 +5,13 @@ use std::path::{Path, PathBuf};
 use std::{env, panic, process};
 
 use clap::{Args, Parser, Subcommand};
-use elementsd::bitcoincore_rpc::bitcoin::hashes::hex::FromHex;
+use elementsd::bitcoincore_rpc::bitcoin;
+use bitcoin::hashes::hex::FromHex;
 use elementsd::bitcoincore_rpc::{Auth, Client, RpcApi};
 use options_lib::miniscript::elements::{AddressParams, AssetId};
 use options_lib::OptionsContract;
 use rpc::OptionOps;
-use secp256k1::hashes::sha256;
+use bitcoin::hashes::sha256;
 
 use crate::contract::OptionsBook;
 mod contract;

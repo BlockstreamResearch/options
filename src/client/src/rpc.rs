@@ -58,7 +58,7 @@ impl OptionOps for Client {
                 bitcoin::Denomination::Bitcoin,
             )
             .unwrap()
-            .as_sat();
+            .to_sat();
             in_total += v;
             pset.add_input(inp);
             if pset.inputs().len() == 2 {
@@ -400,7 +400,7 @@ impl RpcCall for Client {
     }
 
     fn send_to_address(&self, addr: &elements::Address, amt: bitcoin::Amount) -> elements::Txid {
-        let amt = amt.as_btc().to_string();
+        let amt = amt.to_btc().to_string();
         let tx_id = self
             .call_rpc("sendtoaddress", &[addr.to_string().into(), amt.into()])
             .as_str()
@@ -491,7 +491,7 @@ impl RpcCall for Client {
                     bitcoin::Denomination::Bitcoin,
                 )
                 .unwrap()
-                .as_sat();
+                .to_sat();
                 confidential::Value::Explicit(v)
             } else if let Some(value) = utxo_info.get("amountcommitment") {
                 deserialize(&Vec::<u8>::from_hex(value.as_str().unwrap()).unwrap()).unwrap()

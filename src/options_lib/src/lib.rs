@@ -13,12 +13,13 @@
 
 #[cfg(feature = "serde")]
 pub use actual_serde as serde;
+use elements::locktime;
 
 pub extern crate elements_miniscript as miniscript;
 
 pub mod contract;
 pub mod cov_scripts;
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::{error, fmt};
 
 use contract::{abf_to_vbf, Consts, CovUserParams, FundingParams};
@@ -37,8 +38,8 @@ use miniscript::elements::{
     AssetId, BlindError, BlockHash, OutPoint, Script, TxOut, TxOutSecrets, TxOutWitness,
     UnblindError,
 };
-use miniscript::psbt::psbt::PsetBlindError;
 use miniscript::psbt::{PsbtExt, UtxoUpdateError};
+use pset::PsetBlindError;
 
 use crate::contract::draft_contract_hash;
 use crate::cov_scripts::translate_xpk_desc_pubkey;
@@ -76,7 +77,7 @@ pub trait OptionsExt {
         secp: &Secp256k1<secp256k1::All>,
         rng: &mut R,
         params: BaseParams,
-        blinding_sks: &BTreeMap<usize, secp256k1::SecretKey>,
+        blinding_sks: &HashMap<usize, secp256k1::SecretKey>,
     ) -> Result<OptionsContract, Error>;
 
     /// Issues RT tokens without blinds inputs. This can be used with elements wallet that does not blind
@@ -119,7 +120,7 @@ pub trait OptionsExt {
         secp: &Secp256k1<secp256k1::All>,
         rng: &mut R,
         params: BaseParams,
-        txout_secrets: &BTreeMap<usize, TxOutSecrets>,
+        txout_secrets: &HashMap<usize, TxOutSecrets>,
     ) -> Result<OptionsContract, Error>;
 
     /// Fund the options covenant by locking collateral. Issues the ORT/CRT to the parameters
@@ -163,7 +164,7 @@ pub trait OptionsExt {
         secp: &Secp256k1<secp256k1::All>,
         rng: &mut R,
         contract: OptionsContract,
-        blinding_sks: &BTreeMap<usize, secp256k1::SecretKey>,
+        blinding_sks: &HashMap<usize, secp256k1::SecretKey>,
         funding_params: &FundingParams,
     ) -> Result<(), Error>;
 
@@ -216,7 +217,7 @@ pub trait OptionsExt {
         secp: &Secp256k1<secp256k1::All>,
         rng: &mut R,
         contract: OptionsContract,
-        txout_secrets: &mut BTreeMap<usize, TxOutSecrets>,
+        txout_secrets: &mut HashMap<usize, TxOutSecrets>,
         funding_params: &FundingParams,
     ) -> Result<(), Error>;
 
@@ -378,7 +379,7 @@ impl OptionsExt for Pset {
         secp: &Secp256k1<secp256k1::All>,
         rng: &mut R,
         params: BaseParams,
-        blinding_sks: &BTreeMap<usize, secp256k1::SecretKey>,
+        blinding_sks: &HashMap<usize, secp256k1::SecretKey>,
     ) -> Result<OptionsContract, Error> {
         let txout_secrets = pset_txout_secrets(self, secp, blinding_sks)?;
         self.issue_rts_with_blinds(secp, rng, params, &txout_secrets)
@@ -427,7 +428,7 @@ impl OptionsExt for Pset {
         }
 
         let mut offset_vbf = ValueBlindingFactor::zero();
-        let surject_inp = self.surjection_inputs(&BTreeMap::new())?;
+        let surject_inp = self.surjection_inputs(&HashMap::new())?;
         for (_i, asset_id) in arr {
             let out_abf = AssetBlindingFactor::one();
             let exp_asset = Asset::Explicit(asset_id);
@@ -458,7 +459,7 @@ impl OptionsExt for Pset {
         secp: &Secp256k1<secp256k1::All>,
         rng: &mut R,
         params: BaseParams,
-        txout_secrets: &BTreeMap<usize, TxOutSecrets>,
+        txout_secrets: &HashMap<usize, TxOutSecrets>,
     ) -> Result<OptionsContract, Error> {
         if txout_secrets.len() != self.inputs().len() {
             return Err(Error::UtxoSecretLenMismatch);
@@ -511,7 +512,7 @@ impl OptionsExt for Pset {
         // 1) Re-issuance inputs along with issuance information to pset inputs.
         // 2) Re-issuance outputs to pset outputs.
         // 3) Issuance outputs to pset outputs.
-        let mut txout_secrets = BTreeMap::new();
+        let mut txout_secrets = HashMap::new();
         for (i, ((prevout, utxo), token, asset, entropy, addr)) in arr.iter().enumerate() {
             let mut inp = pset::Input::default();
 
@@ -574,7 +575,7 @@ impl OptionsExt for Pset {
         }
 
         offset_vbf = -offset_vbf; // Negate the offset vbf
-        // Blind the remaining txouts
+                                  // Blind the remaining txouts
         self.global.scalars.push(offset_vbf.into_inner());
 
         // Compute the two witnesses for covenant scripts
@@ -585,7 +586,7 @@ impl OptionsExt for Pset {
                 .map_err(|e| Error::UtxoUpdate(i, e))?;
             // There are no signatures here, so we can use default blockhash
             // If we add sigs to covenant, we would also need to pass the genesis hash here
-            self.finalize_inp_mall_mut(secp, i, BlockHash::default())
+            self.finalize_inp_mall_mut(secp, i, BlockHash::all_zeros())
                 .map_err(|e| Error::Finalize(i, e))?;
         }
         Ok(())
@@ -596,7 +597,7 @@ impl OptionsExt for Pset {
         secp: &Secp256k1<secp256k1::All>,
         rng: &mut R,
         contract: OptionsContract,
-        blinding_sks: &BTreeMap<usize, secp256k1::SecretKey>,
+        blinding_sks: &HashMap<usize, secp256k1::SecretKey>,
         funding_params: &FundingParams,
     ) -> Result<(), Error> {
         let mut txout_secrets = pset_txout_secrets(self, secp, blinding_sks)?;
@@ -608,7 +609,7 @@ impl OptionsExt for Pset {
         secp: &Secp256k1<secp256k1::All>,
         rng: &mut R,
         contract: OptionsContract,
-        txout_secrets: &mut BTreeMap<usize, TxOutSecrets>,
+        txout_secrets: &mut HashMap<usize, TxOutSecrets>,
         funding_params: &FundingParams,
     ) -> Result<(), Error> {
         self.fund_contract(secp, rng, contract, funding_params)?;
@@ -914,8 +915,10 @@ fn pset_add_cov(
     inp.previous_output_index = user_params.cov_prevout.0.vout;
     inp.witness_utxo = Some(user_params.cov_prevout.1.clone());
     if let Some(req_locktime) = req_locktime {
-        inp.required_time_locktime = Some(req_locktime); // set the required time as start
-        inp.sequence = Some(u32::MAX - 1); // set to max - 1 in order to timelocks
+        let lt =
+            locktime::Time::from_consensus(req_locktime).map_err(|e| Error::InvalidLocktime(e))?;
+        inp.required_time_locktime = Some(lt); // set the required time as start
+        inp.sequence = Some(elements::Sequence(u32::MAX - 1)); // set to max - 1 in order to timelocks
     }
     pset.insert_input(inp, 0);
 
@@ -947,7 +950,7 @@ fn pset_add_cov(
         .map_err(|e| Error::UtxoUpdate(0, e))?;
     // There are no signatures here, so we can use default blockhash
     // If we add sigs to covenant, we would also need to pass the genesis hash here
-    pset.finalize_inp_mall_mut(secp, 0, BlockHash::default())
+    pset.finalize_inp_mall_mut(secp, 0, BlockHash::all_zeros())
         .map_err(|e| Error::Finalize(0, e))?;
     Ok(())
 }
@@ -956,9 +959,9 @@ fn pset_add_cov(
 fn pset_txout_secrets(
     pset: &Pset,
     secp: &Secp256k1<All>,
-    blinding_sks: &BTreeMap<usize, secp256k1::SecretKey>,
-) -> Result<BTreeMap<usize, TxOutSecrets>, Error> {
-    let mut txout_secrets = BTreeMap::new();
+    blinding_sks: &HashMap<usize, secp256k1::SecretKey>,
+) -> Result<HashMap<usize, TxOutSecrets>, Error> {
+    let mut txout_secrets = HashMap::new();
     let zero_abf = AssetBlindingFactor::zero();
     let zero_vbf = ValueBlindingFactor::zero();
     for (i, inp) in pset.inputs().iter().enumerate() {
@@ -1090,6 +1093,8 @@ pub enum Error {
     UtxoUpdate(usize, UtxoUpdateError),
     /// Finalize error
     Finalize(usize, miniscript::psbt::Error),
+    /// Conversion error from UNIX timestamp to locktime
+    InvalidLocktime(elements::locktime::Error),
 }
 
 impl From<miniscript::Error> for Error {
@@ -1136,6 +1141,7 @@ impl error::Error for Error {
             | Error::IncorrectCovSpk { .. }
             | Error::UtxoSecretLenMismatch => None,
             Error::UnBlindError(e, _i) => Some(e),
+            Error::InvalidLocktime(_e) => None, // This should be some, but guarded by std clause in rust-elements
             Error::PsetBlind(e) => Some(e),
             Error::BlindError(e) => Some(e),
             Error::PsetError(e) => Some(e),
@@ -1240,6 +1246,7 @@ impl fmt::Display for Error {
             Error::MissingInputAmount(i) => write!(f, "Missing explicit input amount at {}", i),
             Error::UtxoUpdate(i, _e) => write!(f, "Utxo update error at index {}", i),
             Error::Finalize(i, _e) => write!(f, "Finalize error at index {}", i),
+            Error::InvalidLocktime(e) => write!(f, "Invalid locktime: {}", e),
         }
     }
 }

@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use elements::pset::PartiallySignedTransaction as Psbt;
-use elements::{pset as psbt, OutPoint, TxOut, Txid};
+use elements::{pset as psbt, OutPoint, TxOut, Txid, PackedLockTime};
 use elements_miniscript as miniscript;
 use elementsd::bitcoincore_rpc::jsonrpc::base64;
 use elementsd::bitcoincore_rpc::jsonrpc::serde_json::json;
@@ -15,11 +15,11 @@ use elementsd::ElementsD;
 use miniscript::bitcoin;
 use miniscript::bitcoin::Amount;
 use miniscript::elements::confidential::{AssetBlindingFactor, ValueBlindingFactor};
-use miniscript::elements::encode::{deserialize, serialize};
-use miniscript::elements::hashes::hex::{FromHex, ToHex};
+use miniscript::elements::encode::{deserialize};
+use miniscript::elements::hashes::hex::{FromHex};
 use miniscript::elements::secp256k1_zkp::rand::thread_rng;
 use miniscript::elements::secp256k1_zkp::Secp256k1;
-use miniscript::elements::{self, AddressParams, AssetId, Script, Transaction, TxOutSecrets};
+use miniscript::elements::{self, AddressParams, AssetId, Script, TxOutSecrets};
 use options_lib::OptionsExt;
 mod setup;
 use options_lib::contract::{CovUserParams, FundingParams};
@@ -49,7 +49,7 @@ fn get_unspent(
                 bitcoin::Denomination::Bitcoin,
             )
             .unwrap()
-            .as_sat(),
+            .to_sat(),
             asset: AssetId::from_hex(&v["asset"].as_str().unwrap()).unwrap(),
         };
         ret.push((inp, secrets));
@@ -60,7 +60,7 @@ fn get_unspent(
     panic!("Cannot fund pset with two seperate utxos: Wallet must have atleast two utxos")
 }
 
-fn get_pset_txout_secrets(cl: &ElementsD, pset: &Psbt) -> BTreeMap<usize, TxOutSecrets> {
+fn _get_pset_txout_secrets(cl: &ElementsD, pset: &Psbt) -> BTreeMap<usize, TxOutSecrets> {
     let value = cl.call("listunspent", &[]);
     let mut ret = BTreeMap::new();
     // This can be more efficient that a 2d loop, but we don't care as of now
@@ -81,7 +81,7 @@ fn get_pset_txout_secrets(cl: &ElementsD, pset: &Psbt) -> BTreeMap<usize, TxOutS
                     bitcoin::Denomination::Bitcoin,
                 )
                 .unwrap()
-                .as_sat(),
+                .to_sat(),
                 asset: AssetId::from_hex(&v["asset"].as_str().unwrap()).unwrap(),
             };
             ret.insert(i, secrets);
@@ -253,6 +253,7 @@ fn test_covenants() {
     let mut pset : Psbt = deserialize(&base64::decode(&pset_base64).unwrap()).unwrap();
     swap_pset(&mut pset, 1, usd_asset, &dummy_addr.script_pubkey());
     swap_pset(&mut pset, 0, contract.ort(), &dummy_addr2.script_pubkey());
+    // pset.global.tx_data.fallback_locktime = Some(PackedLockTime(1659141525 + 60 * 60 * 1)); // 1 hour after start
 
     pset.exercise_contract(&secp, contract, &exercise_params).unwrap();
 
@@ -325,7 +326,7 @@ fn test_covenants() {
     let pset_base64 = value["psbt"].as_str().unwrap().to_string();
     let mut pset : Psbt = deserialize(&base64::decode(&pset_base64).unwrap()).unwrap();
     swap_pset(&mut pset, 0, contract.crt(), &dummy_addr.script_pubkey());
-
+    // pset.global.tx_data.fallback_locktime = Some(PackedLockTime(1659127125 + 60 * 60 * 1)); // 1 hour after expiry
 
     pset.expiry_contract(&secp, contract, &expiry_params).unwrap();
 
