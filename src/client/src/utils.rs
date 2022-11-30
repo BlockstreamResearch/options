@@ -28,7 +28,12 @@ pub fn _options_db_file(mut db_path: PathBuf) -> PathBuf {
     db_path
 }
 
-pub fn _new_client(data_dir: PathBuf, rpc_port: u16, network: &str, wallet_name: &Option<String>) -> Client {
+pub fn _new_client(
+    data_dir: PathBuf,
+    rpc_port: u16,
+    network: &str,
+    wallet_name: &Option<String>,
+) -> Client {
     let cfg_path = data_dir;
     let rpc_socket = SocketAddrV4::new(LOCAL_IP, rpc_port);
     let cookie_file = cfg_path.join(&network).join(".cookie");

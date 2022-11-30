@@ -1,16 +1,16 @@
 //! Data structures shared across local client and RPC server
 
-use std::path::{PathBuf};
-use std::{panic};
+use std::panic;
+use std::path::PathBuf;
 
+use bitcoin::hashes::hex::FromHex;
 use clap::Args;
 use elementsd::bitcoincore_rpc::bitcoin;
-use bitcoin::hashes::hex::FromHex;
-use elementsd::bitcoincore_rpc::{Client};
+use elementsd::bitcoincore_rpc::Client;
+use options_lib::miniscript::elements::{self, AddressParams, AssetId};
 use options_lib::OptionsContract;
-use options_lib::miniscript::elements::{AddressParams, AssetId, self};
 use secp256k1::hashes::sha256;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 use crate::contract::OptionsBook;
 use crate::rpc::OptionOps;
@@ -85,7 +85,6 @@ pub struct InfoResponse {
 }
 
 impl InfoResponse {
-
     pub fn from_contract(contract: &OptionsContract, e_cli: &Client) -> Self {
         InfoResponse {
             id: contract.id(),

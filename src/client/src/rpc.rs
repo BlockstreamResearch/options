@@ -6,6 +6,7 @@ use std::str::FromStr;
 use elementsd::bitcoincore_rpc::bitcoin::hashes::hex::FromHex;
 use elementsd::bitcoincore_rpc::bitcoin::secp256k1::rand::thread_rng;
 use elementsd::bitcoincore_rpc::jsonrpc::base64;
+use elementsd::bitcoincore_rpc::jsonrpc::error::RpcError;
 use elementsd::bitcoincore_rpc::Client;
 use options_lib::contract::{CovUserParams, FundingParams};
 use options_lib::cov_scripts::TrDesc;
@@ -15,7 +16,7 @@ use options_lib::miniscript::elements::pset::PartiallySignedTransaction as Pset;
 use options_lib::miniscript::elements::{
     bitcoin, confidential, AssetId, OutPoint, Script, Transaction, TxOut, TxOutWitness, Txid,
 };
-use options_lib::{pset, BaseParams, OptionsExt};
+use options_lib::{pset, BaseParams, OptionsContract, OptionsExt};
 use secp256k1::hashes::hex::ToHex;
 use secp256k1::SECP256K1;
 use serde_json::{json, Value};
@@ -24,23 +25,58 @@ use crate::contract::OptionsBook;
 use crate::data_structures::{ContractArgs, InitArgs, NetworkParams, QueryResponse};
 
 pub trait OptionOps {
-    fn initialize(&self, _net: &NetworkParams, _args: &InitArgs, book: &mut OptionsBook) -> QueryResponse;
+    fn initialize(
+        &self,
+        _net: &NetworkParams,
+        _args: &InitArgs,
+        book: &mut OptionsBook,
+    ) -> QueryResponse;
 
-    fn fund(&self, _net: &NetworkParams, _args: &ContractArgs, _book: &OptionsBook) -> QueryResponse;
+    fn fund(
+        &self,
+        _net: &NetworkParams,
+        _args: &ContractArgs,
+        _book: &OptionsBook,
+    ) -> QueryResponse;
 
-    fn exercise(&self, _net: &NetworkParams, _args: &ContractArgs, _book: &OptionsBook) -> QueryResponse;
+    fn exercise(
+        &self,
+        _net: &NetworkParams,
+        _args: &ContractArgs,
+        _book: &OptionsBook,
+    ) -> QueryResponse;
 
-    fn cancel(&self, _net: &NetworkParams, _args: &ContractArgs, _book: &OptionsBook) -> QueryResponse;
+    fn cancel(
+        &self,
+        _net: &NetworkParams,
+        _args: &ContractArgs,
+        _book: &OptionsBook,
+    ) -> QueryResponse;
 
-    fn expiry(&self, _net: &NetworkParams, _args: &ContractArgs, _book: &OptionsBook) -> QueryResponse;
+    fn expiry(
+        &self,
+        _net: &NetworkParams,
+        _args: &ContractArgs,
+        _book: &OptionsBook,
+    ) -> QueryResponse;
 
-    fn settle(&self, _net: &NetworkParams, _args: &ContractArgs, _book: &OptionsBook) -> QueryResponse;
+    fn settle(
+        &self,
+        _net: &NetworkParams,
+        _args: &ContractArgs,
+        _book: &OptionsBook,
+    ) -> QueryResponse;
 
     fn liquidity(&self, _desc: &TrDesc) -> u64;
 }
 
 impl OptionOps for Client {
-    fn initialize(&self, net: &NetworkParams, args: &InitArgs, book: &mut OptionsBook) -> QueryResponse {
+    fn initialize(
+        &self,
+        net: &NetworkParams,
+        args: &InitArgs,
+        book: &mut OptionsBook,
+    ) -> QueryResponse {
         let value = self.call_rpc("listunspent", &[]);
         let mut pset = Pset::new_v2();
         let mut in_total = 0;
@@ -109,7 +145,10 @@ impl OptionOps for Client {
         let issue_txid = self.send_raw_transaction(&issue_tx);
         println!("Contract Id: {}", contract.id());
         println!("Issue txid: {}", issue_txid);
-        QueryResponse { contract_id: contract.id(), txid: issue_txid }
+        QueryResponse {
+            contract_id: contract.id(),
+            txid: issue_txid,
+        }
     }
 
     fn fund(&self, net: &NetworkParams, args: &ContractArgs, book: &OptionsBook) -> QueryResponse {
@@ -159,11 +198,21 @@ impl OptionOps for Client {
         let fund_txid = self.send_raw_transaction(&fund_tx);
         println!("Contract Id: {}", contract.id());
         println!("Funding txid: {}", fund_txid);
-        QueryResponse { contract_id: contract.id(), txid: fund_txid }
+        QueryResponse {
+            contract_id: contract.id(),
+            txid: fund_txid,
+        }
     }
 
-    fn exercise(&self, net: &NetworkParams, args: &ContractArgs, book: &OptionsBook) -> QueryResponse {
-        let contract = book.get(&args.contract_id).expect("Contract not found in book");
+    fn exercise(
+        &self,
+        net: &NetworkParams,
+        args: &ContractArgs,
+        book: &OptionsBook,
+    ) -> QueryResponse {
+        let contract = book
+            .get(&args.contract_id)
+            .expect("Contract not found in book");
         let desc = contract.coll_desc();
         let spk = desc.script_pubkey();
         let utxos = self.scan_txout_set(&spk);
@@ -189,141 +238,116 @@ impl OptionOps for Client {
             (addr, contract.params().settle_asset, settle_amt),
         ];
 
-        let mut pset = self.wallet_create_funded_pset(&outputs);
-        pset_fix_output_pos(&mut pset, 0, contract.ort(), &dummy_spk);
-        pset_fix_output_pos(&mut pset, 1, contract.params().settle_asset, &spk);
+        let mut i = 0;
+        let mut retry_count = 0;
+        let mut utxo = utxos[i].clone();
+        let txid = loop {
+            let mut pset = self.wallet_create_funded_pset(&outputs);
+            pset_fix_output_pos(&mut pset, 0, contract.ort(), &dummy_spk);
+            pset_fix_output_pos(&mut pset, 1, contract.params().settle_asset, &spk);
 
-        let user_params = CovUserParams {
-            cov_prevout: utxos[0].clone(), // Use the first utxo for now. We can later on deal with multiple utxos
-            num_contracts: args.num_contracts,
-            dest_addr: self.get_new_address(),
+            let user_params = CovUserParams {
+                cov_prevout: utxo, // Use the first utxo for now. We can later on deal with multiple utxos
+                num_contracts: args.num_contracts,
+                dest_addr: self.get_new_address(),
+            };
+            pset.exercise_contract(SECP256K1, contract, &user_params)
+                .unwrap();
+
+            let pset = self.wallet_process_psbt(&pset, true);
+            let fund_tx = self.finalize_psbt(&pset);
+            let res = self.send_raw_transaction_faillible(&fund_tx);
+
+            let conf_txid = match res {
+                Ok(txid) => break txid,
+                Err(conf_txid) => conf_txid,
+            };
+            let conf_tx = self.get_raw_transaction(conf_txid);
+            utxo = match get_utxo(&conf_tx, &spk) {
+                Some(utxo) => utxo,
+                None => {
+                    i += 1;
+                    if i >= utxos.len() {
+                        panic!("No more contracts on blockchain to interact");
+                    }
+                    utxos[i].clone()
+                }
+            };
+            retry_count += 1;
+            if retry_count > 10 {
+                panic!("Cancel failed after 10 tries")
+            }
         };
-        pset.exercise_contract(SECP256K1, contract, &user_params)
-            .unwrap();
-
-        let pset = self.wallet_process_psbt(&pset, true);
-        let fund_tx = self.finalize_psbt(&pset);
-        let fund_txid = self.send_raw_transaction(&fund_tx);
         println!("Contract Id: {}", contract.id());
-        println!("Exercise txid: {}", fund_txid);
-        QueryResponse { contract_id: contract.id(), txid: fund_txid }
+        println!("Exercise txid: {}", txid);
+        QueryResponse {
+            contract_id: contract.id(),
+            txid: txid,
+        }
     }
 
-    fn cancel(&self, _net: &NetworkParams, args: &ContractArgs, book: &OptionsBook) -> QueryResponse {
-        let contract = book.get(&args.contract_id).expect("Contract not found in book");
+    fn cancel(
+        &self,
+        _net: &NetworkParams,
+        args: &ContractArgs,
+        book: &OptionsBook,
+    ) -> QueryResponse {
+        let contract = book
+            .get(&args.contract_id)
+            .expect("Contract not found in book");
         let desc = contract.coll_desc();
         let spk = desc.script_pubkey();
         let utxos = self.scan_txout_set(&spk);
-        if utxos.is_empty() {
-            panic!("No funded UTXOs found for contract")
-        }
-
-        // Create the cancel tx
-        // Use dummy addresses for op_return as it has no address
-        // The op_return is later replaced by the exercise contract API
-        let (dummy_addr1, dummy_addr2) = (self.get_new_address(), self.get_new_address());
-        let outputs = vec![
-            (
-                dummy_addr1.clone(),
-                contract.crt(),
-                bitcoin::Amount::from_sat(args.num_contracts),
-            ),
-            (
-                dummy_addr2.clone(),
-                contract.ort(),
-                bitcoin::Amount::from_sat(args.num_contracts),
-            ),
-        ];
-        let mut pset = self.wallet_create_funded_pset(&outputs);
-        pset_fix_output_pos(&mut pset, 0, contract.crt(), &dummy_addr1.script_pubkey());
-        pset_fix_output_pos(&mut pset, 1, contract.ort(), &dummy_addr2.script_pubkey());
-
-        let user_params = CovUserParams {
-            cov_prevout: utxos[0].clone(), // Use the first utxo for now. We can later on deal with multiple utxos
-            num_contracts: args.num_contracts,
-            dest_addr: self.get_new_address(),
-        };
-        pset.cancel_contract(SECP256K1, contract, &user_params)
-            .unwrap();
-
-        let pset = self.wallet_process_psbt(&pset, true);
-        let cancel_tx = self.finalize_psbt(&pset);
-        let cancel_txid = self.send_raw_transaction(&cancel_tx);
+        let txid = retry_tx(self, &utxos, &spk, args, contract, &_cancel);
         println!("Contract Id: {}", contract.id());
-        println!("Cancel txid: {}", cancel_txid);
-        QueryResponse { contract_id: contract.id(), txid: cancel_txid }
+        println!("Cancel txid: {}", txid);
+        QueryResponse {
+            contract_id: contract.id(),
+            txid: txid,
+        }
     }
 
-    fn expiry(&self, _net: &NetworkParams, args: &ContractArgs, book: &OptionsBook) -> QueryResponse {
-        let contract = book.get(&args.contract_id).expect("Contract not found in book");
+    fn expiry(
+        &self,
+        _net: &NetworkParams,
+        args: &ContractArgs,
+        book: &OptionsBook,
+    ) -> QueryResponse {
+        let contract = book
+            .get(&args.contract_id)
+            .expect("Contract not found in book");
         let desc = contract.coll_desc();
         let spk = desc.script_pubkey();
         let utxos = self.scan_txout_set(&spk);
-        if utxos.is_empty() {
-            panic!("No funded UTXOs found for contract")
-        }
+        let txid = retry_tx(self, &utxos, &spk, args, contract, &_expiry);
 
-        // Create the expiry tx
-        // Use dummy addresses for op_return as it has no address
-        let dummy_addr1 = self.get_new_address();
-        let outputs = vec![(
-            dummy_addr1.clone(),
-            contract.crt(),
-            bitcoin::Amount::from_sat(args.num_contracts),
-        )];
-        let mut pset = self.wallet_create_funded_pset(&outputs);
-        pset_fix_output_pos(&mut pset, 0, contract.crt(), &dummy_addr1.script_pubkey());
-
-        let user_params = CovUserParams {
-            cov_prevout: utxos[0].clone(), // Use the first utxo for now. We can later on deal with multiple utxos
-            num_contracts: args.num_contracts,
-            dest_addr: self.get_new_address(),
-        };
-        pset.expiry_contract(SECP256K1, contract, &user_params)
-            .unwrap();
-
-        let pset = self.wallet_process_psbt(&pset, true);
-        let expiry_tx = self.finalize_psbt(&pset);
-        let expiry_txid = self.send_raw_transaction(&expiry_tx);
         println!("Contract Id: {}", contract.id());
-        println!("Expiry txid: {}", expiry_txid);
-        QueryResponse { contract_id: contract.id(), txid: expiry_txid }
+        println!("Expiry txid: {}", txid);
+        QueryResponse {
+            contract_id: contract.id(),
+            txid: txid,
+        }
     }
 
-    fn settle(&self, _net: &NetworkParams, args: &ContractArgs, book: &OptionsBook) -> QueryResponse {
-        let contract = book.get(&args.contract_id).expect("Contract not found in book");
+    fn settle(
+        &self,
+        _net: &NetworkParams,
+        args: &ContractArgs,
+        book: &OptionsBook,
+    ) -> QueryResponse {
+        let contract = book
+            .get(&args.contract_id)
+            .expect("Contract not found in book");
         let desc = contract.settle_desc();
         let spk = desc.script_pubkey();
         let utxos = self.scan_txout_set(&spk);
-        if utxos.is_empty() {
-            panic!("No UTXOs found for claiming settlement asset")
-        }
-
-        // Create the expiry tx
-        // Use dummy addresses for op_return as it has no address
-        let dummy_addr1 = self.get_new_address();
-        let outputs = vec![(
-            dummy_addr1.clone(),
-            contract.crt(),
-            bitcoin::Amount::from_sat(args.num_contracts),
-        )];
-        let mut pset = self.wallet_create_funded_pset(&outputs);
-        pset_fix_output_pos(&mut pset, 0, contract.crt(), &dummy_addr1.script_pubkey());
-
-        let user_params = CovUserParams {
-            cov_prevout: utxos[0].clone(), // Use the first utxo for now. We can later on deal with multiple utxos
-            num_contracts: args.num_contracts,
-            dest_addr: self.get_new_address(),
-        };
-
-        pset.settle_contract(SECP256K1, contract, &user_params)
-            .unwrap();
-        let pset = self.wallet_process_psbt(&pset, true);
-        let settle_tx = self.finalize_psbt(&pset);
-        let settle_txid = self.send_raw_transaction(&settle_tx);
+        let txid = retry_tx(self, &utxos, &spk, args, contract, &_settle);
         println!("Contract Id: {}", contract.id());
-        println!("Settle txid: {}", settle_txid);
-        QueryResponse { contract_id: contract.id(), txid: settle_txid }
+        println!("Settle txid: {}", txid);
+        QueryResponse {
+            contract_id: contract.id(),
+            txid: txid,
+        }
     }
 
     fn liquidity(&self, desc: &TrDesc) -> u64 {
@@ -333,14 +357,168 @@ impl OptionOps for Client {
     }
 }
 
+fn retry_tx(
+    cli: &Client,
+    utxos: &[(OutPoint, TxOut)],
+    spk: &Script,
+    args: &ContractArgs,
+    contract: OptionsContract,
+    act_fn: &dyn Fn(
+        &Client,
+        &ContractArgs,
+        OptionsContract,
+        (OutPoint, TxOut),
+    ) -> Result<Txid, Txid>,
+) -> Txid {
+    if utxos.is_empty() {
+        panic!("No UTXOs found for claiming settlement asset")
+    }
+    let mut i = 0;
+    let mut utxo = utxos[i].clone();
+    let mut retry_count = 0;
+    let txid = loop {
+        let res = act_fn(cli, args, contract, utxo);
+        let conf_txid = match res {
+            Ok(txid) => break txid,
+            Err(conf_txid) => conf_txid,
+        };
+        let conf_tx = cli.get_raw_transaction(conf_txid);
+        utxo = match get_utxo(&conf_tx, &spk) {
+            Some(utxo) => utxo,
+            None => {
+                i += 1;
+                if i >= utxos.len() {
+                    panic!("No more contracts on blockchain to interact");
+                }
+                utxos[i].clone()
+            }
+        };
+        retry_count += 1;
+        if retry_count > 10 {
+            panic!("Cancel failed after 10 tries")
+        }
+    };
+    txid
+}
+
+fn _cancel(
+    cli: &Client,
+    args: &ContractArgs,
+    contract: OptionsContract,
+    utxo: (OutPoint, TxOut),
+) -> Result<Txid, Txid> {
+    let (dummy_addr1, dummy_addr2) = (cli.get_new_address(), cli.get_new_address());
+    let outputs = vec![
+        (
+            dummy_addr1.clone(),
+            contract.crt(),
+            bitcoin::Amount::from_sat(args.num_contracts),
+        ),
+        (
+            dummy_addr2.clone(),
+            contract.ort(),
+            bitcoin::Amount::from_sat(args.num_contracts),
+        ),
+    ];
+    let mut pset = cli.wallet_create_funded_pset(&outputs);
+    pset_fix_output_pos(&mut pset, 0, contract.crt(), &dummy_addr1.script_pubkey());
+    pset_fix_output_pos(&mut pset, 1, contract.ort(), &dummy_addr2.script_pubkey());
+
+    let user_params = CovUserParams {
+        cov_prevout: utxo, // Use the first utxo for now. We can later on deal with multiple utxos
+        num_contracts: args.num_contracts,
+        dest_addr: cli.get_new_address(),
+    };
+    pset.cancel_contract(SECP256K1, contract, &user_params)
+        .unwrap();
+
+    let pset = cli.wallet_process_psbt(&pset, true);
+    let cancel_tx = cli.finalize_psbt(&pset);
+    cli.send_raw_transaction_faillible(&cancel_tx)
+}
+
+fn _settle(
+    cli: &Client,
+    args: &ContractArgs,
+    contract: OptionsContract,
+    utxo: (OutPoint, TxOut),
+) -> Result<Txid, Txid> {
+    // Create the expiry tx
+    // Use dummy addresses for op_return as it has no address
+    let dummy_addr1 = cli.get_new_address();
+    let outputs = vec![(
+        dummy_addr1.clone(),
+        contract.crt(),
+        bitcoin::Amount::from_sat(args.num_contracts),
+    )];
+    let mut pset = cli.wallet_create_funded_pset(&outputs);
+    pset_fix_output_pos(&mut pset, 0, contract.crt(), &dummy_addr1.script_pubkey());
+
+    let user_params = CovUserParams {
+        cov_prevout: utxo,
+        num_contracts: args.num_contracts,
+        dest_addr: cli.get_new_address(),
+    };
+
+    pset.settle_contract(SECP256K1, contract, &user_params)
+        .unwrap();
+    let pset = cli.wallet_process_psbt(&pset, true);
+    let settle_tx = cli.finalize_psbt(&pset);
+    cli.send_raw_transaction_faillible(&settle_tx)
+}
+
+fn _expiry(
+    cli: &Client,
+    args: &ContractArgs,
+    contract: OptionsContract,
+    utxo: (OutPoint, TxOut),
+) -> Result<Txid, Txid> {
+    // Create the expiry tx
+    // Use dummy addresses for op_return as it has no address
+    let dummy_addr1 = cli.get_new_address();
+    let outputs = vec![(
+        dummy_addr1.clone(),
+        contract.crt(),
+        bitcoin::Amount::from_sat(args.num_contracts),
+    )];
+    let mut pset = cli.wallet_create_funded_pset(&outputs);
+    pset_fix_output_pos(&mut pset, 0, contract.crt(), &dummy_addr1.script_pubkey());
+
+    let user_params = CovUserParams {
+        cov_prevout: utxo,
+        num_contracts: args.num_contracts,
+        dest_addr: cli.get_new_address(),
+    };
+    pset.expiry_contract(SECP256K1, contract, &user_params)
+        .unwrap();
+
+    let pset = cli.wallet_process_psbt(&pset, true);
+    let expiry_tx = cli.finalize_psbt(&pset);
+    cli.send_raw_transaction_faillible(&expiry_tx)
+}
+
+// Obtain the (outpoint, txout) from the transaction and spk
+fn get_utxo(tx: &Transaction, spk: &Script) -> Option<(OutPoint, TxOut)> {
+    let txid = tx.txid();
+    let vout = tx.output.iter().position(|o| o.script_pubkey == *spk)?;
+    let outpoint = OutPoint::new(txid, vout as u32);
+    let txout = tx.output[vout].clone();
+    Some((outpoint, txout))
+}
+
 pub(crate) trait RpcCall {
     fn call_rpc(&self, cmd: &str, args: &[Value]) -> Value;
+    fn call_rpc_fallible(&self, cmd: &str, args: &[Value]) -> Result<Value, RpcError>;
     fn get_new_address(&self) -> elements::Address;
     fn send_to_address(&self, addr: &elements::Address, amt: bitcoin::Amount) -> elements::Txid;
     fn get_transaction(&self, txid: elements::Txid) -> elements::Transaction;
     fn get_raw_transaction(&self, txid: elements::Txid) -> elements::Transaction;
     fn test_mempool_accept(&self, hex: &elements::Transaction) -> bool;
     fn send_raw_transaction(&self, hex: &elements::Transaction) -> elements::Txid;
+    fn send_raw_transaction_faillible(
+        &self,
+        tx: &elements::Transaction,
+    ) -> Result<elements::Txid, elements::Txid>;
     fn generate(&self, blocks: u32);
     fn wallet_process_psbt(&self, pset: &Pset, sign: bool) -> Pset;
     fn issue_asset(
@@ -365,6 +543,21 @@ pub(crate) trait RpcCall {
 impl RpcCall for Client {
     fn call_rpc(&self, cmd: &str, args: &[Value]) -> Value {
         elementsd::bitcoincore_rpc::RpcApi::call::<Value>(self, cmd, args).unwrap()
+    }
+
+    fn call_rpc_fallible(&self, cmd: &str, args: &[Value]) -> Result<Value, RpcError> {
+        let res = elementsd::bitcoincore_rpc::RpcApi::call::<Value>(self, cmd, args);
+        match res {
+            Ok(v) => Ok(v),
+            Err(elementsd::bitcoincore_rpc::Error::JsonRpc(e)) => {
+                if let elementsd::bitcoincore_rpc::jsonrpc::Error::Rpc(e) = e {
+                    Err(e)
+                } else {
+                    panic!("Unexpected error type")
+                }
+            }
+            _ => unreachable!(),
+        }
     }
 
     fn get_new_address(&self) -> elements::Address {
@@ -422,6 +615,25 @@ impl RpcCall for Client {
             .to_string();
 
         elements::Txid::from_str(&tx_id).unwrap()
+    }
+
+    fn send_raw_transaction_faillible(
+        &self,
+        tx: &elements::Transaction,
+    ) -> Result<elements::Txid, elements::Txid> {
+        let res = self.call_rpc_fallible("sendrawtransaction", &[serialize_hex(tx).into()]);
+        match res {
+            Ok(txid) => Ok(elements::Txid::from_str(&txid.as_str().unwrap()).unwrap()),
+            Err(e) => {
+                if e.code == -26 {
+                    // Transaction already in block chain
+                    let txid = e.message.split_whitespace().last().unwrap();
+                    Err(elements::Txid::from_str(&txid).unwrap())
+                } else {
+                    panic!("Unexpected error: {}", e.message)
+                }
+            }
+        }
     }
 
     fn generate(&self, blocks: u32) {

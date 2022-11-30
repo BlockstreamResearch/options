@@ -1,10 +1,12 @@
 use actix_web::web::Data;
 use actix_web::{middleware, web, App, HttpResponse, HttpServer};
 use options_lib::OptionsContract;
-use options_rpc::ClientArgs;
 use options_rpc::rpc::OptionOps;
+use options_rpc::ClientArgs;
 
-use options_rpc::data_structures::{ContractId, InfoResponse, InitArgs, NetworkParams, ContractArgs};
+use options_rpc::data_structures::{
+    ContractArgs, ContractId, InfoResponse, InitArgs, NetworkParams,
+};
 
 async fn info(item: web::Json<ContractId>, args: Data<ClientArgs>) -> HttpResponse {
     let db = args.read_options_db();
@@ -31,7 +33,9 @@ async fn list(args: Data<ClientArgs>) -> HttpResponse {
 async fn init(init_args: web::Json<InitArgs>, data: Data<ClientArgs>) -> HttpResponse {
     let mut db = data.read_options_db();
     let e_cli = data.elements_cli();
-    let net = NetworkParams {network: data.network.clone()};
+    let net = NetworkParams {
+        network: data.network.clone(),
+    };
     let res = e_cli.initialize(&net, &init_args, &mut db);
     HttpResponse::Ok().json(res) // <- send response
 }
@@ -39,7 +43,9 @@ async fn init(init_args: web::Json<InitArgs>, data: Data<ClientArgs>) -> HttpRes
 async fn fund(fund_args: web::Json<ContractArgs>, data: Data<ClientArgs>) -> HttpResponse {
     let db = data.read_options_db();
     let e_cli = data.elements_cli();
-    let net = NetworkParams {network: data.network.clone()};
+    let net = NetworkParams {
+        network: data.network.clone(),
+    };
     let res = e_cli.fund(&net, &fund_args, &db);
     HttpResponse::Ok().json(res) // <- send response
 }
@@ -47,7 +53,9 @@ async fn fund(fund_args: web::Json<ContractArgs>, data: Data<ClientArgs>) -> Htt
 async fn exercise(exercise_args: web::Json<ContractArgs>, data: Data<ClientArgs>) -> HttpResponse {
     let db = data.read_options_db();
     let e_cli = data.elements_cli();
-    let net = NetworkParams {network: data.network.clone()};
+    let net = NetworkParams {
+        network: data.network.clone(),
+    };
     let res = e_cli.exercise(&net, &exercise_args, &db);
     HttpResponse::Ok().json(res) // <- send response
 }
@@ -55,7 +63,9 @@ async fn exercise(exercise_args: web::Json<ContractArgs>, data: Data<ClientArgs>
 async fn cancel(cancel_args: web::Json<ContractArgs>, data: Data<ClientArgs>) -> HttpResponse {
     let db = data.read_options_db();
     let e_cli = data.elements_cli();
-    let net = NetworkParams {network: data.network.clone()};
+    let net = NetworkParams {
+        network: data.network.clone(),
+    };
     let res = e_cli.cancel(&net, &cancel_args, &db);
     HttpResponse::Ok().json(res) // <- send response
 }
@@ -63,7 +73,9 @@ async fn cancel(cancel_args: web::Json<ContractArgs>, data: Data<ClientArgs>) ->
 async fn expiry(expiry_args: web::Json<ContractArgs>, data: Data<ClientArgs>) -> HttpResponse {
     let db = data.read_options_db();
     let e_cli = data.elements_cli();
-    let net = NetworkParams {network: data.network.clone()};
+    let net = NetworkParams {
+        network: data.network.clone(),
+    };
     let res = e_cli.expiry(&net, &expiry_args, &db);
     HttpResponse::Ok().json(res) // <- send response
 }
@@ -71,7 +83,9 @@ async fn expiry(expiry_args: web::Json<ContractArgs>, data: Data<ClientArgs>) ->
 async fn settle(settle_args: web::Json<ContractArgs>, data: Data<ClientArgs>) -> HttpResponse {
     let db = data.read_options_db();
     let e_cli = data.elements_cli();
-    let net = NetworkParams {network: data.network.clone()};
+    let net = NetworkParams {
+        network: data.network.clone(),
+    };
     let res = e_cli.settle(&net, &settle_args, &db);
     HttpResponse::Ok().json(res) // <- send response
 }

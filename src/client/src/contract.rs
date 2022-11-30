@@ -15,7 +15,9 @@ pub struct OptionsBook {
 impl OptionsBook {
     /// Creates a new [`OptionsBook`].
     pub fn new(path: &Path) -> Self {
-        Self { book: sled::open(path).unwrap() }
+        Self {
+            book: sled::open(path).unwrap(),
+        }
     }
 
     /// Gets the contract from the book. Panic if the contract is not found
@@ -27,6 +29,8 @@ impl OptionsBook {
     /// Inserts a contract into the book
     pub fn insert(&self, contract: &OptionsContract) {
         let key = contract.id();
-        self.book.insert(key.as_inner(), contract.serialize()).unwrap();
+        self.book
+            .insert(key.as_inner(), contract.serialize())
+            .unwrap();
     }
 }

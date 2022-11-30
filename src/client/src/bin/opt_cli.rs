@@ -1,12 +1,12 @@
-use std::fmt::Debug;
-use std::path::{PathBuf};
-use std::{env, panic, process};
 use options_rpc::data_structures::InfoResponse;
 use options_rpc::{data_structures, utils};
+use std::fmt::Debug;
+use std::path::PathBuf;
+use std::{env, panic, process};
 
 use clap::{Parser, Subcommand};
-use data_structures::{InitArgs, ContractArgs, ContractId, NetworkParams};
-use elementsd::bitcoincore_rpc::{Client};
+use data_structures::{ContractArgs, ContractId, InitArgs, NetworkParams};
+use elementsd::bitcoincore_rpc::Client;
 use options_lib::OptionsContract;
 use options_rpc::rpc::OptionOps;
 
