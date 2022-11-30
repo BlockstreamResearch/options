@@ -1,24 +1,32 @@
 //! Operations on all intialized contracts
-use std::collections::BTreeMap;
+use std::path::Path;
 
 use options_lib::miniscript::elements::hashes::sha256;
 use options_lib::OptionsContract;
-use serde::{Deserialize, Serialize};
+use secp256k1::hashes::Hash;
+use sled;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct OptionsBook {
     /// All open options along with Id
-    pub book: BTreeMap<sha256::Hash, OptionsContract>,
+    pub book: sled::Db,
 }
 
 impl OptionsBook {
     /// Creates a new [`OptionsBook`].
-    pub fn new(book: BTreeMap<sha256::Hash, OptionsContract>) -> Self {
-        Self { book }
+    pub fn new(path: &Path) -> Self {
+        Self { book: sled::open(path).unwrap() }
     }
 
     /// Gets the contract from the book. Panic if the contract is not found
-    pub fn get(&self, id: &sha256::Hash) -> &OptionsContract {
-        self.book.get(id).expect("Contract not found in book")
+    pub fn get(&self, key: &sha256::Hash) -> Option<OptionsContract> {
+        let res = self.book.get(&key).unwrap();
+        res.map(|x| OptionsContract::from_slice(&x))
+    }
+
+    /// Inserts a contract into the book
+    pub fn insert(&self, contract: &OptionsContract) {
+        let key = contract.id();
+        self.book.insert(key.as_inner(), contract.serialize()).unwrap();
     }
 }

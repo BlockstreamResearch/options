@@ -21,31 +21,31 @@ use secp256k1::SECP256K1;
 use serde_json::{json, Value};
 
 use crate::contract::OptionsBook;
-use crate::{App, ContractArgs, InitArgs};
+use crate::data_structures::{ContractArgs, InitArgs, NetworkParams, QueryResponse};
 
-pub(crate) trait OptionOps {
-    fn initialize(&self, _cli: &App, _args: &InitArgs, book: &mut OptionsBook);
+pub trait OptionOps {
+    fn initialize(&self, _net: &NetworkParams, _args: &InitArgs, book: &mut OptionsBook) -> QueryResponse;
 
-    fn fund(&self, _cli: &App, _args: &ContractArgs, _book: &OptionsBook);
+    fn fund(&self, _net: &NetworkParams, _args: &ContractArgs, _book: &OptionsBook) -> QueryResponse;
 
-    fn exercise(&self, _cli: &App, _args: &ContractArgs, _book: &OptionsBook);
+    fn exercise(&self, _net: &NetworkParams, _args: &ContractArgs, _book: &OptionsBook) -> QueryResponse;
 
-    fn cancel(&self, _cli: &App, _args: &ContractArgs, _book: &OptionsBook);
+    fn cancel(&self, _net: &NetworkParams, _args: &ContractArgs, _book: &OptionsBook) -> QueryResponse;
 
-    fn expiry(&self, _cli: &App, _args: &ContractArgs, _book: &OptionsBook);
+    fn expiry(&self, _net: &NetworkParams, _args: &ContractArgs, _book: &OptionsBook) -> QueryResponse;
 
-    fn settle(&self, _cli: &App, _args: &ContractArgs, _book: &OptionsBook);
+    fn settle(&self, _net: &NetworkParams, _args: &ContractArgs, _book: &OptionsBook) -> QueryResponse;
 
-    fn liquidity(&self, _book: &OptionsBook, _desc: &TrDesc) -> u64;
+    fn liquidity(&self, _desc: &TrDesc) -> u64;
 }
 
 impl OptionOps for Client {
-    fn initialize(&self, cli: &App, args: &InitArgs, book: &mut OptionsBook) {
+    fn initialize(&self, net: &NetworkParams, args: &InitArgs, book: &mut OptionsBook) -> QueryResponse {
         let value = self.call_rpc("listunspent", &[]);
         let mut pset = Pset::new_v2();
         let mut in_total = 0;
         for v in value.as_array().unwrap() {
-            if v["asset"].as_str().unwrap() != cli.btc_asset().to_string() {
+            if v["asset"].as_str().unwrap() != net.btc_asset().to_string() {
                 // Only look for utxos of a bitcoin asset
                 continue;
             }
@@ -74,12 +74,12 @@ impl OptionOps for Client {
             panic!("InSufficient funds to pay fees")
         }
 
-        let btc_fees_txout = TxOut::new_fee(fees, cli.btc_asset());
+        let btc_fees_txout = TxOut::new_fee(fees, net.btc_asset());
         let addr = RpcCall::get_new_address(self);
         let mut dest_txout = pset::Output::new_explicit(
             addr.script_pubkey(),
             in_total - fees,
-            cli.btc_asset(),
+            net.btc_asset(),
             None,
         );
         dest_txout.blinding_key = addr.blinding_pubkey.map(bitcoin::PublicKey::new);
@@ -105,16 +105,16 @@ impl OptionOps for Client {
         let pset = self.wallet_process_psbt(&pset, true);
 
         let issue_tx = self.finalize_psbt(&pset);
-        cli.add_contract(contract, book);
+        book.insert(&contract);
         let issue_txid = self.send_raw_transaction(&issue_tx);
         println!("Contract Id: {}", contract.id());
         println!("Issue txid: {}", issue_txid);
+        QueryResponse { contract_id: contract.id(), txid: issue_txid }
     }
 
-    fn fund(&self, cli: &App, args: &ContractArgs, book: &OptionsBook) {
+    fn fund(&self, net: &NetworkParams, args: &ContractArgs, book: &OptionsBook) -> QueryResponse {
         // Get the contract from the book
         let contract = book
-            .book
             .get(&args.contract_id)
             .expect("Contract not found in book");
         let desc = contract.funding_desc(SECP256K1);
@@ -143,14 +143,14 @@ impl OptionOps for Client {
         let coll_desc = contract.coll_desc();
         let amt =
             bitcoin::Amount::from_sat(args.num_contracts * contract.params().contract_size as u64);
-        let params = &cli.addr_params();
+        let params = &net.addr_params();
         let coll_spk = coll_desc.script_pubkey();
         let addr = elements::Address::from_script(&coll_spk, None, params).unwrap();
         let outputs = vec![(addr, contract.params().coll_asset, amt)];
         let mut pset = self.wallet_create_funded_pset(&outputs);
         pset_fix_output_pos(&mut pset, 0, contract.params().coll_asset, &coll_spk);
 
-        pset.fund_contract(SECP256K1, &mut thread_rng(), *contract, &fund_args)
+        pset.fund_contract(SECP256K1, &mut thread_rng(), contract, &fund_args)
             .unwrap();
 
         let pset = self.wallet_process_psbt(&pset, true);
@@ -159,10 +159,11 @@ impl OptionOps for Client {
         let fund_txid = self.send_raw_transaction(&fund_tx);
         println!("Contract Id: {}", contract.id());
         println!("Funding txid: {}", fund_txid);
+        QueryResponse { contract_id: contract.id(), txid: fund_txid }
     }
 
-    fn exercise(&self, cli: &App, args: &ContractArgs, book: &OptionsBook) {
-        let contract = book.get(&args.contract_id);
+    fn exercise(&self, net: &NetworkParams, args: &ContractArgs, book: &OptionsBook) -> QueryResponse {
+        let contract = book.get(&args.contract_id).expect("Contract not found in book");
         let desc = contract.coll_desc();
         let spk = desc.script_pubkey();
         let utxos = self.scan_txout_set(&spk);
@@ -175,7 +176,7 @@ impl OptionOps for Client {
         // The op_return is later replaced by the exercise contract API
         let settle_amt =
             bitcoin::Amount::from_sat(args.num_contracts * contract.params().strike_price);
-        let params = &cli.addr_params();
+        let params = &net.addr_params();
         let addr = elements::Address::from_script(&spk, None, params).unwrap();
         let dummy_addr = self.get_new_address();
         let dummy_spk = dummy_addr.script_pubkey();
@@ -197,7 +198,7 @@ impl OptionOps for Client {
             num_contracts: args.num_contracts,
             dest_addr: self.get_new_address(),
         };
-        pset.exercise_contract(SECP256K1, *contract, &user_params)
+        pset.exercise_contract(SECP256K1, contract, &user_params)
             .unwrap();
 
         let pset = self.wallet_process_psbt(&pset, true);
@@ -205,10 +206,11 @@ impl OptionOps for Client {
         let fund_txid = self.send_raw_transaction(&fund_tx);
         println!("Contract Id: {}", contract.id());
         println!("Exercise txid: {}", fund_txid);
+        QueryResponse { contract_id: contract.id(), txid: fund_txid }
     }
 
-    fn cancel(&self, _cli: &App, args: &ContractArgs, book: &OptionsBook) {
-        let contract = book.get(&args.contract_id);
+    fn cancel(&self, _net: &NetworkParams, args: &ContractArgs, book: &OptionsBook) -> QueryResponse {
+        let contract = book.get(&args.contract_id).expect("Contract not found in book");
         let desc = contract.coll_desc();
         let spk = desc.script_pubkey();
         let utxos = self.scan_txout_set(&spk);
@@ -241,7 +243,7 @@ impl OptionOps for Client {
             num_contracts: args.num_contracts,
             dest_addr: self.get_new_address(),
         };
-        pset.cancel_contract(SECP256K1, *contract, &user_params)
+        pset.cancel_contract(SECP256K1, contract, &user_params)
             .unwrap();
 
         let pset = self.wallet_process_psbt(&pset, true);
@@ -249,10 +251,11 @@ impl OptionOps for Client {
         let cancel_txid = self.send_raw_transaction(&cancel_tx);
         println!("Contract Id: {}", contract.id());
         println!("Cancel txid: {}", cancel_txid);
+        QueryResponse { contract_id: contract.id(), txid: cancel_txid }
     }
 
-    fn expiry(&self, _cli: &App, args: &ContractArgs, book: &OptionsBook) {
-        let contract = book.get(&args.contract_id);
+    fn expiry(&self, _net: &NetworkParams, args: &ContractArgs, book: &OptionsBook) -> QueryResponse {
+        let contract = book.get(&args.contract_id).expect("Contract not found in book");
         let desc = contract.coll_desc();
         let spk = desc.script_pubkey();
         let utxos = self.scan_txout_set(&spk);
@@ -276,7 +279,7 @@ impl OptionOps for Client {
             num_contracts: args.num_contracts,
             dest_addr: self.get_new_address(),
         };
-        pset.expiry_contract(SECP256K1, *contract, &user_params)
+        pset.expiry_contract(SECP256K1, contract, &user_params)
             .unwrap();
 
         let pset = self.wallet_process_psbt(&pset, true);
@@ -284,10 +287,11 @@ impl OptionOps for Client {
         let expiry_txid = self.send_raw_transaction(&expiry_tx);
         println!("Contract Id: {}", contract.id());
         println!("Expiry txid: {}", expiry_txid);
+        QueryResponse { contract_id: contract.id(), txid: expiry_txid }
     }
 
-    fn settle(&self, _cli: &App, args: &ContractArgs, book: &OptionsBook) {
-        let contract = book.get(&args.contract_id);
+    fn settle(&self, _net: &NetworkParams, args: &ContractArgs, book: &OptionsBook) -> QueryResponse {
+        let contract = book.get(&args.contract_id).expect("Contract not found in book");
         let desc = contract.settle_desc();
         let spk = desc.script_pubkey();
         let utxos = self.scan_txout_set(&spk);
@@ -312,16 +316,17 @@ impl OptionOps for Client {
             dest_addr: self.get_new_address(),
         };
 
-        pset.settle_contract(SECP256K1, *contract, &user_params)
+        pset.settle_contract(SECP256K1, contract, &user_params)
             .unwrap();
         let pset = self.wallet_process_psbt(&pset, true);
         let settle_tx = self.finalize_psbt(&pset);
         let settle_txid = self.send_raw_transaction(&settle_tx);
         println!("Contract Id: {}", contract.id());
         println!("Settle txid: {}", settle_txid);
+        QueryResponse { contract_id: contract.id(), txid: settle_txid }
     }
 
-    fn liquidity(&self, _book: &OptionsBook, desc: &TrDesc) -> u64 {
+    fn liquidity(&self, desc: &TrDesc) -> u64 {
         let utxos = self.scan_txout_set(&desc.script_pubkey());
         // Calculate the total amount of collateral
         utxos.iter().map(|u| u.1.value.explicit().unwrap()).sum()

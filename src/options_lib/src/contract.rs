@@ -1,8 +1,7 @@
 //! Create a call option on Elements
 use std::str::FromStr;
 
-use elements::encode::Encodable;
-use elements::hashes::HashEngine;
+use elements::encode::{Encodable, Decodable};
 use miniscript::bitcoin::{self, XOnlyPublicKey};
 use miniscript::elements::confidential::{AssetBlindingFactor, ValueBlindingFactor};
 use miniscript::elements::hashes::{sha256, Hash};
@@ -32,14 +31,34 @@ pub struct BaseParams {
 }
 
 impl BaseParams {
-    /// Add the information of BaseParams to HashEngine
-    fn id(&self, mut engine: &mut sha256::HashEngine) {
-        self.contract_size.consensus_encode(&mut engine).unwrap();
-        self.expiry.consensus_encode(&mut engine).unwrap();
-        self.start.consensus_encode(&mut engine).unwrap();
-        self.strike_price.consensus_encode(&mut engine).unwrap();
-        self.coll_asset.consensus_encode(&mut engine).unwrap();
-        self.settle_asset.consensus_encode(&mut engine).unwrap();
+
+    /// Serialize into a writer
+    pub fn serialize_to_writer<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
+        self.contract_size.consensus_encode(&mut writer).unwrap();
+        self.expiry.consensus_encode(&mut writer).unwrap();
+        self.start.consensus_encode(&mut writer).unwrap();
+        self.strike_price.consensus_encode(&mut writer).unwrap();
+        self.coll_asset.consensus_encode(&mut writer).unwrap();
+        self.settle_asset.consensus_encode(&mut writer).unwrap();
+        Ok(())
+    }
+
+    /// Deserialize from a reader
+    pub fn deserialize_from_reader<R: std::io::Read>(mut reader: R) -> Result<Self, std::io::Error> {
+        let contract_size = u64::consensus_decode(&mut reader).unwrap();
+        let expiry = u32::consensus_decode(&mut reader).unwrap();
+        let start = u32::consensus_decode(&mut reader).unwrap();
+        let strike_price = u64::consensus_decode(&mut reader).unwrap();
+        let coll_asset = AssetId::consensus_decode(&mut reader).unwrap();
+        let settle_asset = AssetId::consensus_decode(&mut reader).unwrap();
+        Ok(Self {
+            contract_size,
+            expiry,
+            start,
+            strike_price,
+            coll_asset,
+            settle_asset,
+        })
     }
 }
 
@@ -183,13 +202,62 @@ impl OptionsContract {
     /// Returns the contract hash of this [`OptionsContract`].
     pub fn id(&self) -> sha256::Hash {
         let mut engine = sha256::Hash::engine();
-        self.params.id(&mut engine);
-        engine.input(&self.crt_rt.into_inner());
-        engine.input(&self.ort_rt.into_inner());
-        engine.input(&self.crt.into_inner());
-        engine.input(&self.ort.into_inner());
+        self.serialize_to_writer(&mut engine).unwrap();
         sha256::Hash::from_engine(engine)
     }
+
+    /// Serializes the contract into a writer
+    pub fn serialize_to_writer<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
+        self.params.serialize_to_writer(&mut writer)?;
+        self.crt_rt.consensus_encode(&mut writer).unwrap();
+        self.ort_rt.consensus_encode(&mut writer).unwrap();
+        self.crt.consensus_encode(&mut writer).unwrap();
+        self.ort.consensus_encode(&mut writer).unwrap();
+        self.crt_reissue_entropy.consensus_encode(&mut writer).unwrap();
+        self.ort_reissue_entropy.consensus_encode(&mut writer).unwrap();
+        self.unspend_key.serialize().consensus_encode(&mut writer).unwrap();
+        Ok(())
+    }
+
+    /// Serializes the contract into a vector
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        self.serialize_to_writer(&mut buf).unwrap();
+        buf
+    }
+
+    /// Deserializes the contract from a reader
+    pub fn deserialize_from_reader<R: std::io::Read>(
+        mut reader: R,
+    ) -> Result<Self, std::io::Error> {
+        let params = BaseParams::deserialize_from_reader(&mut reader)?;
+        let crt_rt = AssetId::consensus_decode(&mut reader).unwrap();
+        let ort_rt = AssetId::consensus_decode(&mut reader).unwrap();
+        let crt = AssetId::consensus_decode(&mut reader).unwrap();
+        let ort = AssetId::consensus_decode(&mut reader).unwrap();
+        let crt_reissue_entropy = sha256::Midstate::consensus_decode(&mut reader).unwrap();
+        let ort_reissue_entropy = sha256::Midstate::consensus_decode(&mut reader).unwrap();
+        let unspend_key = XOnlyPublicKey::from_slice(
+            &<[u8; 32]>::consensus_decode(&mut reader).unwrap(),
+        )
+        .unwrap();
+        Ok(Self {
+            crt_rt,
+            ort_rt,
+            crt,
+            ort,
+            crt_reissue_entropy,
+            ort_reissue_entropy,
+            unspend_key,
+            params,
+        })
+    }
+
+    /// Deserialize from slice
+    pub fn from_slice(slice: &[u8]) -> Self {
+        Self::deserialize_from_reader(slice).unwrap()
+    }
+
 }
 
 /// Parameters to be used when funding a new options contract
@@ -278,4 +346,52 @@ impl Consts for ValueBlindingFactor {
 /// Converts an asset blinding factor to value blinding factor
 pub fn abf_to_vbf(a: AssetBlindingFactor) -> ValueBlindingFactor {
     ValueBlindingFactor::from_slice(a.into_inner().as_ref()).unwrap()
+}
+
+
+#[cfg(test)]
+mod tests {
+
+    use elements::Txid;
+
+    use super::*;
+
+    #[test]
+    fn test_roundtrip() {
+        // Test serialize and deserialize from writer
+        let params = BaseParams {
+            contract_size: 100_000,
+            expiry: 1659640176, // UNIX timestamp
+            start: 1659640076,
+            strike_price: 20_000,
+            coll_asset: AssetId::from_str(
+                "3d8f49e01b8b2eab8bae136c9c0db8f0c6dce48cdeac3f3784b7af2844d523c8",
+            )
+            .unwrap(), // Note that asset id is parsed reverse as per elements convention
+            settle_asset: AssetId::from_str(
+                "cc4b500625764881971716718c9305da17363e4e97b6bcd26b30c9627dbe3868",
+            )
+            .unwrap(), //
+        };
+        let crt_rt_issue_prevout = OutPoint {
+            txid: Txid::from_str(
+                "5efe259e7b13724eb89ab0ee71739cdeeb04c6fb18d2851385c621902ee9cb94",
+            )
+            .unwrap(), // parsed reverse as per convention
+            vout: 0,
+        };
+        let ort_rt_issue_prevout = OutPoint {
+            txid: Txid::from_str(
+                "5efe259e7b13724eb89ab0ee71739cdeeb04c6fb18d2851385c621902ee9cb94",
+            )
+            .unwrap(), // parsed reverse as per convention
+            vout: 1,
+        };
+
+        let contract = OptionsContract::new(params, crt_rt_issue_prevout, ort_rt_issue_prevout);
+        let ser = contract.serialize();
+        let contract2 = OptionsContract::from_slice(&ser);
+        assert_eq!(contract, contract2);
+        assert_eq!(ser, contract2.serialize());
+    }
 }
