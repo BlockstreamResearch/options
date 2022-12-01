@@ -11,7 +11,7 @@ use options_rpc::data_structures::{
 async fn info(item: web::Json<ContractId>, args: Data<ClientArgs>) -> HttpResponse {
     let db = args.read_options_db();
     let e_cli = args.elements_cli();
-    let contract = db.get(&item.id).unwrap();
+    let contract = db.get(&item.contract_id).unwrap();
     let info = InfoResponse::from_contract(&contract, &e_cli);
     HttpResponse::Ok().json(info) // <- send response
 }
@@ -109,6 +109,7 @@ async fn main() -> std::io::Result<()> {
             .service(web::resource("/init").route(web::post().to(init)))
             .service(web::resource("/fund").route(web::post().to(fund)))
             .service(web::resource("/cancel").route(web::post().to(cancel)))
+            .service(web::resource("/expire").route(web::post().to(expiry)))
             .service(web::resource("/expiry").route(web::post().to(expiry)))
             .service(web::resource("/exercise").route(web::post().to(exercise)))
             .service(web::resource("/settle").route(web::post().to(settle)))

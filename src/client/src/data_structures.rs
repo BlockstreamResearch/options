@@ -19,7 +19,7 @@ use crate::utils;
 #[derive(Args, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ContractId {
     /// Contract Id
-    pub id: sha256::Hash,
+    pub contract_id: sha256::Hash,
 }
 
 #[derive(Debug, Clone, Args, Serialize, Deserialize)]
@@ -72,7 +72,7 @@ pub struct QueryResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InfoResponse {
-    pub id: sha256::Hash,
+    pub contract_id: sha256::Hash,
     pub coll_asset: AssetId,
     pub settle_asset: AssetId,
     pub contract_size: u64,
@@ -87,7 +87,7 @@ pub struct InfoResponse {
 impl InfoResponse {
     pub fn from_contract(contract: &OptionsContract, e_cli: &Client) -> Self {
         InfoResponse {
-            id: contract.id(),
+            contract_id: contract.id(),
             coll_asset: contract.params().coll_asset,
             settle_asset: contract.params().settle_asset,
             contract_size: contract.params().contract_size,
