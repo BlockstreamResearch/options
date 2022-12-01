@@ -7,6 +7,7 @@ use bitcoin::hashes::hex::FromHex;
 use clap::Args;
 use elementsd::bitcoincore_rpc::bitcoin;
 use elementsd::bitcoincore_rpc::Client;
+use options_lib::BaseParams;
 use options_lib::miniscript::elements::{self, AddressParams, AssetId};
 use options_lib::OptionsContract;
 use secp256k1::hashes::sha256;
@@ -82,6 +83,58 @@ pub struct InfoResponse {
     pub crt: AssetId,
     pub ort: AssetId,
     pub liquidity: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OptionsImportParams {
+    pub contract_size: u64,
+    pub expiry: u32,
+    pub start: u32,
+    pub strike_price: u64,
+    pub coll_asset: AssetId,
+    pub settle_asset: AssetId,
+    pub crt_rt_prevout_txid: elements::Txid,
+    pub crt_rt_prevout_vout: u32,
+    pub ort_rt_prevout_txid: elements::Txid,
+    pub ort_rt_prevout_vout: u32,
+}
+
+impl OptionsImportParams {
+
+    pub fn from_contract(contract: OptionsContract) -> Self {
+        Self {
+            contract_size: contract.params().contract_size,
+            expiry: contract.params().expiry,
+            start: contract.params().start,
+            strike_price: contract.params().strike_price,
+            coll_asset: contract.params().coll_asset,
+            settle_asset: contract.params().settle_asset,
+            crt_rt_prevout_txid: contract.crt_rt_prevout().txid,
+            crt_rt_prevout_vout: contract.crt_rt_prevout().vout,
+            ort_rt_prevout_txid: contract.ort_rt_prevout().txid,
+            ort_rt_prevout_vout: contract.ort_rt_prevout().vout,
+        }
+    }
+
+    pub fn to_contract(&self) -> OptionsContract {
+        let params = BaseParams {
+            contract_size: self.contract_size,
+            expiry: self.expiry,
+            start: self.start,
+            strike_price: self.strike_price,
+            coll_asset: self.coll_asset,
+            settle_asset: self.settle_asset,
+        };
+        let crt_prevout = elements::OutPoint {
+            txid: self.crt_rt_prevout_txid,
+            vout: self.crt_rt_prevout_vout,
+        };
+        let ort_prevout = elements::OutPoint {
+            txid: self.ort_rt_prevout_txid,
+            vout: self.ort_rt_prevout_vout,
+        };
+        OptionsContract::new(params, crt_prevout, ort_prevout)
+    }
 }
 
 impl InfoResponse {
@@ -160,7 +213,6 @@ impl ClientArgs {
     pub fn read_options_db(&self) -> OptionsBook {
         let data_dir = utils::_data_dir(&self.data_dir);
         let db_path = utils::_options_db_file(data_dir);
-        dbg!(&db_path);
         OptionsBook::new(&db_path)
     }
 

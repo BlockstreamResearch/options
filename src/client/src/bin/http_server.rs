@@ -5,7 +5,7 @@ use options_rpc::rpc::OptionOps;
 use options_rpc::ClientArgs;
 
 use options_rpc::data_structures::{
-    ContractArgs, ContractId, InfoResponse, InitArgs, NetworkParams,
+    ContractArgs, ContractId, InfoResponse, InitArgs, NetworkParams, OptionsImportParams,
 };
 
 async fn info(item: web::Json<ContractId>, args: Data<ClientArgs>) -> HttpResponse {
@@ -17,11 +17,11 @@ async fn info(item: web::Json<ContractId>, args: Data<ClientArgs>) -> HttpRespon
 }
 
 async fn list(args: Data<ClientArgs>) -> HttpResponse {
-    let num_max_entries = 30;
+    let num_max_entries = 1000;
     let mut res = Vec::with_capacity(num_max_entries);
     let db = args.read_options_db();
     let e_cli = args.elements_cli();
-    for item in db.book.iter().take(100) {
+    for item in db.book.iter().take(num_max_entries) {
         let (_id, contract) = item.unwrap();
         let contract = OptionsContract::from_slice(&contract);
         let info = InfoResponse::from_contract(&contract, &e_cli);
@@ -90,6 +90,29 @@ async fn settle(settle_args: web::Json<ContractArgs>, data: Data<ClientArgs>) ->
     HttpResponse::Ok().json(res) // <- send response
 }
 
+async fn import(import_args: web::Json<OptionsImportParams>, data: Data<ClientArgs>) -> HttpResponse {
+    let db = data.read_options_db();
+    let contract = import_args.to_contract();
+    db.insert(&contract);
+    let res = ContractId {
+        contract_id: contract.id(),
+    };
+    HttpResponse::Ok().json(res) // <- send response
+}
+
+async fn export(export_args: web::Json<ContractId>, data: Data<ClientArgs>) -> HttpResponse {
+    let db = data.read_options_db();
+    let contract = db.get(&export_args.contract_id).unwrap();
+    let res = OptionsImportParams::from_contract(contract);
+    HttpResponse::Ok().json(res) // <- send response
+}
+
+async fn remove(remove_args: web::Json<ContractId>, data: Data<ClientArgs>) -> HttpResponse {
+    let db = data.read_options_db();
+    db.remove(&remove_args.contract_id);
+    HttpResponse::Ok().json(true) // <- send response
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
@@ -113,6 +136,9 @@ async fn main() -> std::io::Result<()> {
             .service(web::resource("/expiry").route(web::post().to(expiry)))
             .service(web::resource("/exercise").route(web::post().to(exercise)))
             .service(web::resource("/settle").route(web::post().to(settle)))
+            .service(web::resource("/import").route(web::post().to(import)))
+            .service(web::resource("/export").route(web::post().to(export)))
+            .service(web::resource("/remove").route(web::post().to(remove)))
     })
     .bind(("127.0.0.1", 8080))?
     .run()

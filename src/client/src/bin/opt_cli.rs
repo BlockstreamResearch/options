@@ -115,7 +115,7 @@ fn main() {
             }
             print_string(&res);
         }
-        Some(Commands::Info(id)) => match book.get(&id.id) {
+        Some(Commands::Info(id)) => match book.get(&id.contract_id) {
             None => panic!("Contract ID not found"),
             Some(x) => {
                 let info = InfoResponse::from_contract(&x, &e_cli);

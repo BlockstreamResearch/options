@@ -33,4 +33,9 @@ impl OptionsBook {
             .insert(key.as_inner(), contract.serialize())
             .unwrap();
     }
+
+    /// Removes a contract from the book
+    pub fn remove(&self, key: &sha256::Hash) {
+        self.book.remove(&key).unwrap();
+    }
 }

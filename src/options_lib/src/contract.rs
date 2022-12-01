@@ -86,6 +86,10 @@ pub struct OptionsContract {
     unspend_key: XOnlyPublicKey,
     /// The config for this contract
     params: BaseParams,
+    /// Issuance CRT RT prevout
+    crt_rt_prevout: OutPoint,
+    /// Issuance ORT RT prevout
+    ort_rt_prevout: OutPoint,
 }
 
 /// Returns the [`ContractHash`] used in this contract
@@ -96,13 +100,13 @@ pub fn draft_contract_hash() -> ContractHash {
 
 impl OptionsContract {
     /// Creates a new [`OptionsContract`].
-    pub fn new(params: BaseParams, crt_prevout: OutPoint, ort_prevout: OutPoint) -> Self {
+    pub fn new(params: BaseParams, crt_rt_prevout: OutPoint, ort_rt_prevout: OutPoint) -> Self {
         // Versioning incase we want to update the scripts
         let contract_hash = draft_contract_hash();
         let (crt_reissue_entropy, crt, crt_rt) =
-            new_issuance(crt_prevout, contract_hash, /*confidential*/ false);
+            new_issuance(crt_rt_prevout, contract_hash, /*confidential*/ false);
         let (ort_reissue_entropy, ort, ort_rt) =
-            new_issuance(ort_prevout, contract_hash, /*confidential*/ false);
+            new_issuance(ort_rt_prevout, contract_hash, /*confidential*/ false);
         // unspendable key = lift_x(Hash(ser(G)))
         let unspend_key = bitcoin::XOnlyPublicKey::from_str(
             "50929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac0",
@@ -117,6 +121,8 @@ impl OptionsContract {
             ort_reissue_entropy,
             unspend_key,
             params,
+            crt_rt_prevout,
+            ort_rt_prevout,
         }
     }
 
@@ -209,13 +215,8 @@ impl OptionsContract {
     /// Serializes the contract into a writer
     pub fn serialize_to_writer<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
         self.params.serialize_to_writer(&mut writer)?;
-        self.crt_rt.consensus_encode(&mut writer).unwrap();
-        self.ort_rt.consensus_encode(&mut writer).unwrap();
-        self.crt.consensus_encode(&mut writer).unwrap();
-        self.ort.consensus_encode(&mut writer).unwrap();
-        self.crt_reissue_entropy.consensus_encode(&mut writer).unwrap();
-        self.ort_reissue_entropy.consensus_encode(&mut writer).unwrap();
-        self.unspend_key.serialize().consensus_encode(&mut writer).unwrap();
+        self.crt_rt_prevout.consensus_encode(&mut writer).unwrap();
+        self.ort_rt_prevout.consensus_encode(&mut writer).unwrap();
         Ok(())
     }
 
@@ -231,26 +232,9 @@ impl OptionsContract {
         mut reader: R,
     ) -> Result<Self, std::io::Error> {
         let params = BaseParams::deserialize_from_reader(&mut reader)?;
-        let crt_rt = AssetId::consensus_decode(&mut reader).unwrap();
-        let ort_rt = AssetId::consensus_decode(&mut reader).unwrap();
-        let crt = AssetId::consensus_decode(&mut reader).unwrap();
-        let ort = AssetId::consensus_decode(&mut reader).unwrap();
-        let crt_reissue_entropy = sha256::Midstate::consensus_decode(&mut reader).unwrap();
-        let ort_reissue_entropy = sha256::Midstate::consensus_decode(&mut reader).unwrap();
-        let unspend_key = XOnlyPublicKey::from_slice(
-            &<[u8; 32]>::consensus_decode(&mut reader).unwrap(),
-        )
-        .unwrap();
-        Ok(Self {
-            crt_rt,
-            ort_rt,
-            crt,
-            ort,
-            crt_reissue_entropy,
-            ort_reissue_entropy,
-            unspend_key,
-            params,
-        })
+        let crt_rt_prevout = OutPoint::consensus_decode(&mut reader).unwrap();
+        let ort_rt_prevout = OutPoint::consensus_decode(&mut reader).unwrap();
+        Ok(Self::new(params, crt_rt_prevout, ort_rt_prevout))
     }
 
     /// Deserialize from slice
@@ -258,6 +242,16 @@ impl OptionsContract {
         Self::deserialize_from_reader(slice).unwrap()
     }
 
+
+    /// Returns the crt rt prevout of this [`OptionsContract`].
+    pub fn crt_rt_prevout(&self) -> OutPoint {
+        self.crt_rt_prevout
+    }
+
+    /// Returns the ort rt prevout of this [`OptionsContract`].
+    pub fn ort_rt_prevout(&self) -> OutPoint {
+        self.ort_rt_prevout
+    }
 }
 
 /// Parameters to be used when funding a new options contract
