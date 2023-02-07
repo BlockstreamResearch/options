@@ -5,14 +5,34 @@ buyers the right, but not the obligation, to buy or sell an underlying asset at
 an agreed-upon price and date. These are commonly known as strike price and expiry date.
 Similarly, in elements we can create options using covenants and assets. Options can be
 created between any two assets, however for simplicity we assume bitcoin-lusd call options.
+The detailed documentation with usage can be found at [liquid docs](https://docs.liquid.net/docs/swaps-and-smart-contracts#fully-collateralized-options-contracts-on-liquid). In case of conflict, refer
+to the above document for the latest version.
 
-# Components:
+# Known Limitations (PoC software):
+
+- The client code does not do any coin selection to select covenant UTXO to interact
+with. It selects the first covenant UTXO it finds. For example, if there are two covenants with 10 contracts each,
+and the user wants to exercise 15 contracts, the client would select the first covenant and exercise 10 contracts.
+Then repeat the process again to exercise the remaining 5 contracts. This is just a limitation of the current PoC
+implementation, not an inherent limitation of the protocol.
+- When initialize contract via `init`, the client wallet must have two UTXOs with bitcoin asset. This is because
+we need to create two re-issuance covenants for ORT and CRT. The client code can be modified to split the UTXO
+into two UTXOs incase there is only one UTXO with bitcoin asset, but this is not implemented in the PoC.
+
+# Known Limitations of the Protocol:
+
+- If multiple users try to exercise the same option, there will be a race and only a subset of users can get the tx confirmed. Consider a covenant UTXO where multiple users are trying to spend it. If the covenant is partially exercised/cancel/expired, another covenant output is generated. If multiple users try to spend the same covenant output, only one will get confirmed. In this case, the users should observe the mempool and try to spend the new covenant output from the mempool. In the absolute worst case, only one trade gets executed per block. In other cases, we can spend the unconfirmed covenant outputs and multiple trades can be executed per block. Another solution used for this is to "Sequences" or "Sequencers". These are centralized services, that sequence the transactions from users to have multiple trades executed per block. This is an inherent limitation of the protocol.
+- It is possible that an in-the-money option is not fully exercised by the holders of the Option Token. It also may be possible that an out-of-the-money option is exercised by a subset of the Option Token holders. In these cases, the holders of the Grantor Tokens have a choice to try to claim the Settlement Asset or Collateral Asset, however only a small subset will be able to get the more profitable choice. There may be a bidding war with higher fees or an incentive for functionaries to favor certain parties to be able to claim the more profitable choice.
+
 
 ## Options-lib:
     The underlying code for options library with covenant logic and pset interface
 
 ## Options Client(opt-cli)
     The client that operates with elementsd wallet to interact with the options
+
+## Options Http Server(http-server)
+    The http server that allows interacting with options client.
 # Terminology:
 
 - ORT: Options Rights Token, represents the right to exercise the option
