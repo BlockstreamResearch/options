@@ -90,9 +90,16 @@ async fn settle(settle_args: web::Json<ContractArgs>, data: Data<ClientArgs>) ->
     HttpResponse::Ok().json(res) // <- send response
 }
 
-async fn import(import_args: web::Json<OptionsImportParams>, data: Data<ClientArgs>) -> HttpResponse {
+async fn import(
+    import_args: web::Json<OptionsImportParams>,
+    data: Data<ClientArgs>,
+) -> HttpResponse {
     let db = data.read_options_db();
     let contract = import_args.to_contract();
+    let e_cli = data.elements_cli();
+    if !e_cli.validate(&contract) {
+        return HttpResponse::BadRequest().into();
+    }
     db.insert(&contract);
     let res = ContractId {
         contract_id: contract.id(),

@@ -68,6 +68,8 @@ pub trait OptionOps {
     ) -> QueryResponse;
 
     fn liquidity(&self, _desc: &TrDesc) -> u64;
+
+    fn validate(&self, contract: &OptionsContract) -> bool;
 }
 
 impl OptionOps for Client {
@@ -354,6 +356,27 @@ impl OptionOps for Client {
         let utxos = self.scan_txout_set(&desc.script_pubkey());
         // Calculate the total amount of collateral
         utxos.iter().map(|u| u.1.value.explicit().unwrap()).sum()
+    }
+
+    fn validate(&self, contract: &OptionsContract) -> bool {
+        // Check crt_rt and ort_rt outpoints number of confirmations
+        let crt_rt_prevout = contract.crt_rt_prevout();
+        let ort_rt_prevout = contract.ort_rt_prevout();
+        let crt_conf = self.get_num_confirmations(crt_rt_prevout.txid);
+        if crt_rt_prevout.txid != ort_rt_prevout.txid
+            || crt_rt_prevout.vout != 0
+            || ort_rt_prevout.vout != 1
+            || crt_conf < 1
+        {
+            return false;
+        }
+        let fund_spk = contract.funding_desc(SECP256K1).script_pubkey();
+        let init_tx = self.get_raw_transaction(crt_rt_prevout.txid);
+        if init_tx.output.len() < 2 {
+            return false;
+        }
+        init_tx.output[0].script_pubkey == fund_spk && init_tx.output[1].script_pubkey == fund_spk
+        // The assets and rt blinding cycle are correctly checked by the covenant.
     }
 }
 
