@@ -7,8 +7,9 @@ use bitcoin::hashes::hex::FromHex;
 use clap::Args;
 use elementsd::bitcoincore_rpc::bitcoin;
 use elementsd::bitcoincore_rpc::Client;
-use options_lib::BaseParams;
+use options_lib::miniscript::elements::ContractHash;
 use options_lib::miniscript::elements::{self, AddressParams, AssetId};
+use options_lib::BaseParams;
 use options_lib::OptionsContract;
 use secp256k1::hashes::sha256;
 use serde::{Deserialize, Serialize};
@@ -43,6 +44,10 @@ pub struct InitArgs {
     /// The settlement asset id(reversed as per elements convention)
     #[clap(long)]
     pub settle_asset: AssetId,
+    /// Contract hash used for this contract. This is a free form field that can be
+    /// used for asset registry
+    #[clap(long)]
+    pub contract_hash: Option<ContractHash>,
 }
 
 #[derive(Debug, Clone, Args, Serialize, Deserialize)]
@@ -97,10 +102,10 @@ pub struct OptionsImportParams {
     pub crt_rt_prevout_vout: u32,
     pub ort_rt_prevout_txid: elements::Txid,
     pub ort_rt_prevout_vout: u32,
+    pub contract_hash: ContractHash,
 }
 
 impl OptionsImportParams {
-
     pub fn from_contract(contract: OptionsContract) -> Self {
         Self {
             contract_size: contract.params().contract_size,
@@ -113,6 +118,7 @@ impl OptionsImportParams {
             crt_rt_prevout_vout: contract.crt_rt_prevout().vout,
             ort_rt_prevout_txid: contract.ort_rt_prevout().txid,
             ort_rt_prevout_vout: contract.ort_rt_prevout().vout,
+            contract_hash: contract.params().contract_hash,
         }
     }
 
@@ -124,6 +130,7 @@ impl OptionsImportParams {
             strike_price: self.strike_price,
             coll_asset: self.coll_asset,
             settle_asset: self.settle_asset,
+            contract_hash: self.contract_hash,
         };
         let crt_prevout = elements::OutPoint {
             txid: self.crt_rt_prevout_txid,

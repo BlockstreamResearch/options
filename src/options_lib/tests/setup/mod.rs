@@ -37,12 +37,14 @@ pub fn setup(validate_pegin: bool) -> (ElementsD, Option<BitcoinD>, elements::Bl
         .position(|x| x.starts_with("-initialfreecoins="));
 
     match arg_pos {
-        Some(i) => conf.0.args[i] = "-initialfreecoins=210000000000",
-        None => conf.0.args.push("-initialfreecoins=210000000000"),
+        Some(i) => conf.0.args[i] = "-initialfreecoins=0",
+        None => conf.0.args.push("-initialfreecoins=0"),
     };
 
     conf.0.args.push("-debug=1");
     conf.0.args.push("-multi_data_permitted=1");
+    conf.0.args.push("-con_blocksubsidy=5000000000");
+
     let elementsd = ElementsD::with_conf(elementsd::exe_path().unwrap(), &conf).unwrap();
 
     let create = elementsd.call("createwallet", &["wallet".into()]);
@@ -51,10 +53,15 @@ pub fn setup(validate_pegin: bool) -> (ElementsD, Option<BitcoinD>, elements::Bl
     let rescan = elementsd.call("rescanblockchain", &[]);
     assert_eq!(rescan.get("stop_height").unwrap().as_u64().unwrap(), 0);
 
+    elementsd.generate(125);
+    let rescan = elementsd.call("rescanblockchain", &[]);
+    assert_eq!(rescan.get("stop_height").unwrap().as_u64().unwrap(), 125);
+
     let balances = elementsd.call("getbalances", &[]);
+
     let mine = balances.get("mine").unwrap();
     let trusted = mine.get("trusted").unwrap();
-    assert_eq!(trusted.get("bitcoin").unwrap().as_f64().unwrap(), 2100.0);
+    assert_eq!(trusted.get("bitcoin").unwrap().as_f64().unwrap(), 1250.0);
 
     let v = elementsd.call("listunspent", &[]);
     let btc_asset_id = AssetId::from_hex(&v[0]["asset"].as_str().unwrap()).unwrap();
@@ -130,7 +137,7 @@ impl Call for ElementsD {
     }
 
     fn send_to_address(&self, addr: &elements::Address, amt: bitcoin::Amount) -> elements::Txid {
-        let amt = amt.as_btc().to_string();
+        let amt = amt.to_btc().to_string();
         let tx_id = self
             .call("sendtoaddress", &[addr.to_string().into(), amt.into()])
             .as_str()

@@ -251,6 +251,8 @@ mod tests {
 
     use std::str::FromStr;
 
+    use elements::ContractHash;
+    use elements::hashes::Hash;
     use miniscript::elements::confidential::{AssetBlindingFactor, Value, ValueBlindingFactor};
     use miniscript::elements::encode::deserialize;
     use miniscript::elements::hashes::hex::FromHex;
@@ -278,6 +280,7 @@ mod tests {
                 "cc4b500625764881971716718c9305da17363e4e97b6bcd26b30c9627dbe3868",
             )
             .unwrap(), //
+            contract_hash: ContractHash::hash(b"test-asset"),
         };
         let crt_rt_issue_prevout = OutPoint {
             txid: Txid::from_str(
@@ -401,13 +404,13 @@ mod tests {
         let one_abf = AssetBlindingFactor::one();
         let one_vbf = ValueBlindingFactor::one();
         let zero_vbf = ValueBlindingFactor::zero();
-        dbg!(ValueBlindingFactor::last(
+        ValueBlindingFactor::last(
             &secp,
             1,
             one_abf,
             &[(1, one_abf, one_vbf); 3],
             &[(1, one_abf, zero_vbf); 2]
-        ));
+        );
     }
 
     #[test]

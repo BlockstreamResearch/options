@@ -10,13 +10,14 @@ use elementsd::bitcoincore_rpc::jsonrpc::error::RpcError;
 use elementsd::bitcoincore_rpc::Client;
 use options_lib::contract::{CovUserParams, FundingParams};
 use options_lib::cov_scripts::TrDesc;
-use options_lib::miniscript::elements;
+use options_lib::miniscript::elements::{self, ContractHash};
 use options_lib::miniscript::elements::encode::{deserialize, serialize, serialize_hex};
 use options_lib::miniscript::elements::pset::PartiallySignedTransaction as Pset;
 use options_lib::miniscript::elements::{
     bitcoin, confidential, AssetId, OutPoint, Script, Transaction, TxOut, TxOutWitness, Txid,
 };
 use options_lib::{pset, BaseParams, OptionsContract, OptionsExt};
+use secp256k1::hashes::Hash;
 use secp256k1::hashes::hex::ToHex;
 use secp256k1::SECP256K1;
 use serde_json::{json, Value};
@@ -104,7 +105,14 @@ impl OptionOps for Client {
             }
         }
         if pset.inputs().len() != 2 {
-            panic!("Cannot fund pset with two seperate utxos: Wallet must have atleast two utxos")
+            println!("Cannot fund pset with two seperate utxos: Wallet must have atleast two utxos");
+            if pset.inputs().len() == 1 {
+                println!("Wallet has one utxo. Splitting the UTXO into two. And retrying the init command again");
+                let txid = self.send_to_self();
+                println!("Split txid: {}", txid);
+                panic!("Retry after one confirmation");
+            }
+            panic!("Wallet has no bitcoin UTXOs");
         }
         let fees = 1_000; // random fixed value for fees.
 
@@ -135,6 +143,7 @@ impl OptionOps for Client {
             strike_price: args.strike_price,
             coll_asset: args.coll_asset,
             settle_asset: args.settle_asset,
+            contract_hash: args.contract_hash.unwrap_or(ContractHash::hash("No-Contract-hash".as_bytes())),
         };
 
         let contract = pset
@@ -537,6 +546,7 @@ pub(crate) trait RpcCall {
     fn get_transaction(&self, txid: elements::Txid) -> elements::Transaction;
     fn get_raw_transaction(&self, txid: elements::Txid) -> elements::Transaction;
     fn test_mempool_accept(&self, hex: &elements::Transaction) -> bool;
+    fn send_to_self(&self) -> elements::Txid;
     fn send_raw_transaction(&self, hex: &elements::Transaction) -> elements::Txid;
     fn send_raw_transaction_faillible(
         &self,
@@ -628,6 +638,12 @@ impl RpcCall for Client {
             .unwrap()
             .to_string();
         elements::Txid::from_str(&tx_id).unwrap()
+    }
+
+    fn send_to_self(&self) -> elements::Txid {
+        let amt = bitcoin::Amount::from_sat(1_000); // Some small fixed hard-coded amount
+        let addr = self.get_new_address();
+        self.send_to_address(&addr, amt)
     }
 
     fn send_raw_transaction(&self, tx: &elements::Transaction) -> elements::Txid {

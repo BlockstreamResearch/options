@@ -41,7 +41,6 @@ use miniscript::elements::{
 use miniscript::psbt::{PsbtExt, UtxoUpdateError};
 use pset::PsetBlindError;
 
-use crate::contract::draft_contract_hash;
 use crate::cov_scripts::translate_xpk_desc_pubkey;
 
 /// Trait for adding options contract support for Pset
@@ -424,7 +423,8 @@ impl OptionsExt for Pset {
 
             self.inputs_mut()[i].issuance_value_amount = None;
             self.inputs_mut()[i].issuance_inflation_keys = Some(1);
-            self.inputs_mut()[i].issuance_asset_entropy = Some(draft_contract_hash().into_inner());
+            self.inputs_mut()[i].issuance_asset_entropy =
+                Some(contract.params().contract_hash.into_inner());
         }
 
         let mut offset_vbf = ValueBlindingFactor::zero();

@@ -1,7 +1,7 @@
 //! Create a call option on Elements
 use std::str::FromStr;
 
-use elements::encode::{Encodable, Decodable};
+use elements::encode::{Decodable, Encodable};
 use miniscript::bitcoin::{self, XOnlyPublicKey};
 use miniscript::elements::confidential::{AssetBlindingFactor, ValueBlindingFactor};
 use miniscript::elements::hashes::{sha256, Hash};
@@ -28,29 +28,41 @@ pub struct BaseParams {
     pub coll_asset: AssetId,
     /// The settlement asset id
     pub settle_asset: AssetId,
+    /// Contract hash used for this contract if specified
+    pub contract_hash: ContractHash,
 }
 
 impl BaseParams {
-
     /// Serialize into a writer
-    pub fn serialize_to_writer<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
+    pub fn serialize_to_writer<W: std::io::Write>(
+        &self,
+        mut writer: W,
+    ) -> Result<(), std::io::Error> {
         self.contract_size.consensus_encode(&mut writer).unwrap();
         self.expiry.consensus_encode(&mut writer).unwrap();
         self.start.consensus_encode(&mut writer).unwrap();
         self.strike_price.consensus_encode(&mut writer).unwrap();
         self.coll_asset.consensus_encode(&mut writer).unwrap();
         self.settle_asset.consensus_encode(&mut writer).unwrap();
+        self.contract_hash
+            .into_inner()
+            .consensus_encode(&mut writer)
+            .unwrap();
         Ok(())
     }
 
     /// Deserialize from a reader
-    pub fn deserialize_from_reader<R: std::io::Read>(mut reader: R) -> Result<Self, std::io::Error> {
+    pub fn deserialize_from_reader<R: std::io::Read>(
+        mut reader: R,
+    ) -> Result<Self, std::io::Error> {
         let contract_size = u64::consensus_decode(&mut reader).unwrap();
         let expiry = u32::consensus_decode(&mut reader).unwrap();
         let start = u32::consensus_decode(&mut reader).unwrap();
         let strike_price = u64::consensus_decode(&mut reader).unwrap();
         let coll_asset = AssetId::consensus_decode(&mut reader).unwrap();
         let settle_asset = AssetId::consensus_decode(&mut reader).unwrap();
+        let bytes = <[u8; 32]>::consensus_decode(&mut reader).unwrap();
+        let contract_hash = ContractHash::from_inner(bytes);
         Ok(Self {
             contract_size,
             expiry,
@@ -58,6 +70,7 @@ impl BaseParams {
             strike_price,
             coll_asset,
             settle_asset,
+            contract_hash: contract_hash,
         })
     }
 }
@@ -92,17 +105,11 @@ pub struct OptionsContract {
     ort_rt_prevout: OutPoint,
 }
 
-/// Returns the [`ContractHash`] used in this contract
-/// This can be used as a versioning system across multiple updates to this contract
-pub fn draft_contract_hash() -> ContractHash {
-    ContractHash::hash("elements-options-draft-v0".as_bytes())
-}
-
 impl OptionsContract {
     /// Creates a new [`OptionsContract`].
     pub fn new(params: BaseParams, crt_rt_prevout: OutPoint, ort_rt_prevout: OutPoint) -> Self {
         // Versioning incase we want to update the scripts
-        let contract_hash = draft_contract_hash();
+        let contract_hash = params.contract_hash;
         let (crt_reissue_entropy, crt, crt_rt) =
             new_issuance(crt_rt_prevout, contract_hash, /*confidential*/ false);
         let (ort_reissue_entropy, ort, ort_rt) =
@@ -213,7 +220,10 @@ impl OptionsContract {
     }
 
     /// Serializes the contract into a writer
-    pub fn serialize_to_writer<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
+    pub fn serialize_to_writer<W: std::io::Write>(
+        &self,
+        mut writer: W,
+    ) -> Result<(), std::io::Error> {
         self.params.serialize_to_writer(&mut writer)?;
         self.crt_rt_prevout.consensus_encode(&mut writer).unwrap();
         self.ort_rt_prevout.consensus_encode(&mut writer).unwrap();
@@ -241,7 +251,6 @@ impl OptionsContract {
     pub fn from_slice(slice: &[u8]) -> Self {
         Self::deserialize_from_reader(slice).unwrap()
     }
-
 
     /// Returns the crt rt prevout of this [`OptionsContract`].
     pub fn crt_rt_prevout(&self) -> OutPoint {
@@ -342,7 +351,6 @@ pub fn abf_to_vbf(a: AssetBlindingFactor) -> ValueBlindingFactor {
     ValueBlindingFactor::from_slice(a.into_inner().as_ref()).unwrap()
 }
 
-
 #[cfg(test)]
 mod tests {
 
@@ -366,6 +374,7 @@ mod tests {
                 "cc4b500625764881971716718c9305da17363e4e97b6bcd26b30c9627dbe3868",
             )
             .unwrap(), //
+            contract_hash: ContractHash::hash("test".as_bytes()),
         };
         let crt_rt_issue_prevout = OutPoint {
             txid: Txid::from_str(
