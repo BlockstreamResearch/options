@@ -395,7 +395,7 @@ fn retry_tx(
     // Returns
     let mut args = _args.clone();
     let mut ret = Vec::new();
-    while args.num_contracts > 0 || ret.len() < 10 {
+    while args.num_contracts > 0 && ret.len() < 10 {
         let (num_contracts, txid) = _retry_tx(cli, utxos, spk, &args, contract, cov_type, act_fn);
         args.num_contracts -= num_contracts;
         ret.push((num_contracts, txid));
@@ -422,7 +422,7 @@ fn _retry_tx(
         UserCovType::Settlement => contract.params().strike_price,
     };
     if utxos.is_empty() {
-        panic!("No UTXOs found for claiming settlement asset")
+        panic!("No covenant UTXOs found. wait for confirmations")
     }
     let mut i = 0;
     let mut utxo = utxos[i].clone();
