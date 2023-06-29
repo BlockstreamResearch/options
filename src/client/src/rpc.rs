@@ -10,15 +10,15 @@ use elementsd::bitcoincore_rpc::jsonrpc::error::RpcError;
 use elementsd::bitcoincore_rpc::Client;
 use options_lib::contract::{CovUserParams, FundingParams};
 use options_lib::cov_scripts::TrDesc;
-use options_lib::miniscript::elements::{self, ContractHash};
 use options_lib::miniscript::elements::encode::{deserialize, serialize, serialize_hex};
 use options_lib::miniscript::elements::pset::PartiallySignedTransaction as Pset;
+use options_lib::miniscript::elements::{self, ContractHash};
 use options_lib::miniscript::elements::{
     bitcoin, confidential, AssetId, OutPoint, Script, Transaction, TxOut, TxOutWitness, Txid,
 };
-use options_lib::{pset, BaseParams, OptionsContract, OptionsExt};
-use secp256k1::hashes::Hash;
+use options_lib::{pset, BaseParams, OptionsContract, OptionsExt, UserCovType};
 use secp256k1::hashes::hex::ToHex;
+use secp256k1::hashes::Hash;
 use secp256k1::SECP256K1;
 use serde_json::{json, Value};
 
@@ -105,7 +105,9 @@ impl OptionOps for Client {
             }
         }
         if pset.inputs().len() != 2 {
-            println!("Cannot fund pset with two seperate utxos: Wallet must have atleast two utxos");
+            println!(
+                "Cannot fund pset with two seperate utxos: Wallet must have atleast two utxos"
+            );
             if pset.inputs().len() == 1 {
                 println!("Wallet has one utxo. Splitting the UTXO into two. And retrying the init command again");
                 let txid = self.send_to_self();
@@ -143,7 +145,12 @@ impl OptionOps for Client {
             strike_price: args.strike_price,
             coll_asset: args.coll_asset,
             settle_asset: args.settle_asset,
-            contract_hash: args.contract_hash.unwrap_or(ContractHash::hash("No-Contract-hash".as_bytes())),
+            crt_contract_hash: args
+                .crt_contract_hash
+                .unwrap_or(ContractHash::hash("No-Contract-hash-crt".as_bytes())),
+            ort_contract_hash: args
+                .ort_contract_hash
+                .unwrap_or(ContractHash::hash("No-Contract-hash-ort".as_bytes())),
         };
 
         let contract = pset
@@ -158,7 +165,7 @@ impl OptionOps for Client {
         println!("Issue txid: {}", issue_txid);
         QueryResponse {
             contract_id: contract.id(),
-            txid: issue_txid,
+            transactions: vec![(1, issue_txid)],
         }
     }
 
@@ -211,13 +218,13 @@ impl OptionOps for Client {
         println!("Funding txid: {}", fund_txid);
         QueryResponse {
             contract_id: contract.id(),
-            txid: fund_txid,
+            transactions: vec![(args.num_contracts, fund_txid)],
         }
     }
 
     fn exercise(
         &self,
-        net: &NetworkParams,
+        _net: &NetworkParams,
         args: &ContractArgs,
         book: &OptionsBook,
     ) -> QueryResponse {
@@ -227,73 +234,19 @@ impl OptionOps for Client {
         let desc = contract.coll_desc();
         let spk = desc.script_pubkey();
         let utxos = self.scan_txout_set(&spk);
-        if utxos.is_empty() {
-            panic!("No funded UTXOs found for contract")
-        }
-
-        // Create the exercise tx
-        // Use dummy addresses for op_return as it has no address
-        // The op_return is later replaced by the exercise contract API
-        let settle_amt =
-            bitcoin::Amount::from_sat(args.num_contracts * contract.params().strike_price);
-        let params = &net.addr_params();
-        let addr = elements::Address::from_script(&spk, None, params).unwrap();
-        let dummy_addr = self.get_new_address();
-        let dummy_spk = dummy_addr.script_pubkey();
-        let outputs = vec![
-            (
-                dummy_addr,
-                contract.ort(),
-                bitcoin::Amount::from_sat(args.num_contracts),
-            ),
-            (addr, contract.params().settle_asset, settle_amt),
-        ];
-
-        let mut i = 0;
-        let mut retry_count = 0;
-        let mut utxo = utxos[i].clone();
-        let txid = loop {
-            let mut pset = self.wallet_create_funded_pset(&outputs);
-            pset_fix_output_pos(&mut pset, 0, contract.ort(), &dummy_spk);
-            pset_fix_output_pos(&mut pset, 1, contract.params().settle_asset, &spk);
-
-            let user_params = CovUserParams {
-                cov_prevout: utxo, // Use the first utxo for now. We can later on deal with multiple utxos
-                num_contracts: args.num_contracts,
-                dest_addr: self.get_new_address(),
-            };
-            pset.exercise_contract(SECP256K1, contract, &user_params)
-                .unwrap();
-
-            let pset = self.wallet_process_psbt(&pset, true);
-            let fund_tx = self.finalize_psbt(&pset);
-            let res = self.send_raw_transaction_faillible(&fund_tx);
-
-            let conf_txid = match res {
-                Ok(txid) => break txid,
-                Err(conf_txid) => conf_txid,
-            };
-            let conf_tx = self.get_raw_transaction(conf_txid);
-            utxo = match get_utxo(&conf_tx, &spk) {
-                Some(utxo) => utxo,
-                None => {
-                    i += 1;
-                    if i >= utxos.len() {
-                        panic!("No more contracts on blockchain to interact");
-                    }
-                    utxos[i].clone()
-                }
-            };
-            retry_count += 1;
-            if retry_count > 10 {
-                panic!("Cancel failed after 10 tries")
-            }
-        };
+        let txs_vec = retry_tx(
+            self,
+            &utxos,
+            &spk,
+            args,
+            contract,
+            UserCovType::Collateral,
+            &_exercise,
+        );
         println!("Contract Id: {}", contract.id());
-        println!("Exercise txid: {}", txid);
         QueryResponse {
             contract_id: contract.id(),
-            txid: txid,
+            transactions: txs_vec,
         }
     }
 
@@ -309,12 +262,19 @@ impl OptionOps for Client {
         let desc = contract.coll_desc();
         let spk = desc.script_pubkey();
         let utxos = self.scan_txout_set(&spk);
-        let txid = retry_tx(self, &utxos, &spk, args, contract, &_cancel);
+        let txs_vec = retry_tx(
+            self,
+            &utxos,
+            &spk,
+            args,
+            contract,
+            UserCovType::Collateral,
+            &_cancel,
+        );
         println!("Contract Id: {}", contract.id());
-        println!("Cancel txid: {}", txid);
         QueryResponse {
             contract_id: contract.id(),
-            txid: txid,
+            transactions: txs_vec,
         }
     }
 
@@ -330,13 +290,20 @@ impl OptionOps for Client {
         let desc = contract.coll_desc();
         let spk = desc.script_pubkey();
         let utxos = self.scan_txout_set(&spk);
-        let txid = retry_tx(self, &utxos, &spk, args, contract, &_expiry);
+        let txs_vec = retry_tx(
+            self,
+            &utxos,
+            &spk,
+            args,
+            contract,
+            UserCovType::Collateral,
+            &_expiry,
+        );
 
         println!("Contract Id: {}", contract.id());
-        println!("Expiry txid: {}", txid);
         QueryResponse {
             contract_id: contract.id(),
-            txid: txid,
+            transactions: txs_vec,
         }
     }
 
@@ -352,12 +319,18 @@ impl OptionOps for Client {
         let desc = contract.settle_desc();
         let spk = desc.script_pubkey();
         let utxos = self.scan_txout_set(&spk);
-        let txid = retry_tx(self, &utxos, &spk, args, contract, &_settle);
-        println!("Contract Id: {}", contract.id());
-        println!("Settle txid: {}", txid);
+        let txs_vec = retry_tx(
+            self,
+            &utxos,
+            &spk,
+            args,
+            contract,
+            UserCovType::Settlement,
+            &_settle,
+        );
         QueryResponse {
             contract_id: contract.id(),
-            txid: txid,
+            transactions: txs_vec,
         }
     }
 
@@ -384,6 +357,22 @@ impl OptionOps for Client {
         if init_tx.output.len() < 2 {
             return false;
         }
+        let issuance_count = init_tx.input.iter().filter(|i| i.has_issuance()).count();
+        if issuance_count != 2 {
+            return false;
+        }
+        // Check that issuance amount and inflation keys are correct
+        if !init_tx.input[0].asset_issuance.amount.is_null()
+            || !init_tx.input[1].asset_issuance.amount.is_null()
+        {
+            return false;
+        }
+        // Check that issuance inflation keys are Some(1)
+        if init_tx.input[0].asset_issuance.inflation_keys.explicit() != Some(1)
+            || init_tx.input[1].asset_issuance.inflation_keys.explicit() != Some(1)
+        {
+            return false;
+        }
         init_tx.output[0].script_pubkey == fund_spk && init_tx.output[1].script_pubkey == fund_spk
         // The assets and rt blinding cycle are correctly checked by the covenant.
     }
@@ -393,25 +382,62 @@ fn retry_tx(
     cli: &Client,
     utxos: &[(OutPoint, TxOut)],
     spk: &Script,
-    args: &ContractArgs,
+    _args: &ContractArgs,
     contract: OptionsContract,
+    cov_type: UserCovType,
     act_fn: &dyn Fn(
         &Client,
         &ContractArgs,
         OptionsContract,
         (OutPoint, TxOut),
     ) -> Result<Txid, Txid>,
-) -> Txid {
+) -> Vec<(u64, Txid)> {
+    // Returns
+    let mut args = _args.clone();
+    let mut ret = Vec::new();
+    while args.num_contracts > 0 || ret.len() < 10 {
+        let (num_contracts, txid) = _retry_tx(cli, utxos, spk, &args, contract, cov_type, act_fn);
+        args.num_contracts -= num_contracts;
+        ret.push((num_contracts, txid));
+    }
+    ret
+}
+
+fn _retry_tx(
+    cli: &Client,
+    utxos: &[(OutPoint, TxOut)],
+    spk: &Script,
+    args: &ContractArgs,
+    contract: OptionsContract,
+    cov_type: UserCovType,
+    act_fn: &dyn Fn(
+        &Client,
+        &ContractArgs,
+        OptionsContract,
+        (OutPoint, TxOut),
+    ) -> Result<Txid, Txid>,
+) -> (u64, Txid) {
+    let contract_multiplier = match cov_type {
+        UserCovType::Collateral => contract.params().contract_size,
+        UserCovType::Settlement => contract.params().strike_price,
+    };
     if utxos.is_empty() {
         panic!("No UTXOs found for claiming settlement asset")
     }
     let mut i = 0;
     let mut utxo = utxos[i].clone();
     let mut retry_count = 0;
-    let txid = loop {
-        let res = act_fn(cli, args, contract, utxo);
+    let (txid, new_args) = loop {
+        assert!(utxo.1.value.explicit().unwrap() % contract_multiplier == 0);
+        let in_contracts = utxo.1.value.explicit().unwrap() / contract_multiplier as u64;
+        let mut new_args = args.clone();
+        if in_contracts < args.num_contracts {
+            new_args.num_contracts = in_contracts;
+        }
+
+        let res = act_fn(cli, &new_args, contract, utxo);
         let conf_txid = match res {
-            Ok(txid) => break txid,
+            Ok(txid) => break (txid, new_args),
             Err(conf_txid) => conf_txid,
         };
         let conf_tx = cli.get_raw_transaction(conf_txid);
@@ -430,7 +456,7 @@ fn retry_tx(
             panic!("Cancel failed after 10 tries")
         }
     };
-    txid
+    (new_args.num_contracts, txid)
 }
 
 fn _cancel(
@@ -467,6 +493,45 @@ fn _cancel(
     let pset = cli.wallet_process_psbt(&pset, true);
     let cancel_tx = cli.finalize_psbt(&pset);
     cli.send_raw_transaction_faillible(&cancel_tx)
+}
+
+fn _exercise(
+    cli: &Client,
+    args: &ContractArgs,
+    contract: OptionsContract,
+    utxo: (OutPoint, TxOut),
+) -> Result<Txid, Txid> {
+    // Create the exercise tx
+    // Use dummy addresses for op_return as it has no address
+    // The op_return is later replaced by the exercise contract API
+    let settle_amt = bitcoin::Amount::from_sat(args.num_contracts * contract.params().strike_price);
+    let dummy_addr = cli.get_new_address();
+    let dummy_addr2 = cli.get_new_address();
+    let dummy_spk = dummy_addr.script_pubkey();
+    let dummy_spk2 = dummy_addr2.script_pubkey();
+    let outputs = vec![
+        (
+            dummy_addr,
+            contract.ort(),
+            bitcoin::Amount::from_sat(args.num_contracts),
+        ),
+        (dummy_addr2, contract.params().settle_asset, settle_amt),
+    ];
+    let mut pset = cli.wallet_create_funded_pset(&outputs);
+    pset_fix_output_pos(&mut pset, 0, contract.ort(), &dummy_spk);
+    pset_fix_output_pos(&mut pset, 1, contract.params().settle_asset, &dummy_spk2);
+
+    let user_params = CovUserParams {
+        cov_prevout: utxo, // Use the first utxo for now. We can later on deal with multiple utxos
+        num_contracts: args.num_contracts,
+        dest_addr: cli.get_new_address(),
+    };
+    pset.exercise_contract(SECP256K1, contract, &user_params)
+        .unwrap();
+
+    let pset = cli.wallet_process_psbt(&pset, true);
+    let fund_tx = cli.finalize_psbt(&pset);
+    cli.send_raw_transaction_faillible(&fund_tx)
 }
 
 fn _settle(

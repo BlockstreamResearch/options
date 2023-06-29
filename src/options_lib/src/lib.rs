@@ -824,7 +824,7 @@ impl OptionsExt for Pset {
 
 /// User facing covenant contracts
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Ord, Eq, Hash)]
-enum UserCovType {
+pub enum UserCovType {
     /// Collateral covenant
     Collateral,
     /// Settlement covenant
