@@ -9,7 +9,7 @@ use std::str::FromStr;
 use elements::encode::serialize_hex;
 use elements::hashes::Hash;
 use elements::pset::PartiallySignedTransaction as Psbt;
-use elements::{pset as psbt, OutPoint, TxOut, Txid, ContractHash};
+use elements::{pset as psbt, ContractHash, OutPoint, TxOut, Txid};
 use elements_miniscript as miniscript;
 use elementsd::bitcoincore_rpc::jsonrpc::base64;
 use elementsd::bitcoincore_rpc::jsonrpc::serde_json::json;
@@ -160,7 +160,8 @@ fn test_covenants() {
         strike_price: 500,
         coll_asset: *btc_asset_id,
         settle_asset: usd_asset,
-        contract_hash: ContractHash::hash("data".as_bytes()),
+        crt_contract_hash: ContractHash::hash("data-crt".as_bytes()),
+        ort_contract_hash: ContractHash::hash("data-ort".as_bytes()),
     };
     let secp = Secp256k1::new();
 

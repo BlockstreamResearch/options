@@ -251,8 +251,8 @@ mod tests {
 
     use std::str::FromStr;
 
-    use elements::ContractHash;
     use elements::hashes::Hash;
+    use elements::ContractHash;
     use miniscript::elements::confidential::{AssetBlindingFactor, Value, ValueBlindingFactor};
     use miniscript::elements::encode::deserialize;
     use miniscript::elements::hashes::hex::FromHex;
@@ -280,7 +280,8 @@ mod tests {
                 "cc4b500625764881971716718c9305da17363e4e97b6bcd26b30c9627dbe3868",
             )
             .unwrap(), //
-            contract_hash: ContractHash::hash(b"test-asset"),
+            crt_contract_hash: ContractHash::hash(b"test-asset"),
+            ort_contract_hash: ContractHash::hash(b"test-asset2"),
         };
         let crt_rt_issue_prevout = OutPoint {
             txid: Txid::from_str(
@@ -409,7 +410,7 @@ mod tests {
             1,
             one_abf,
             &[(1, one_abf, one_vbf); 3],
-            &[(1, one_abf, zero_vbf); 2]
+            &[(1, one_abf, zero_vbf); 2],
         );
     }
 

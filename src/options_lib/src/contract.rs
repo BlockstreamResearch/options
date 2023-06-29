@@ -28,8 +28,10 @@ pub struct BaseParams {
     pub coll_asset: AssetId,
     /// The settlement asset id
     pub settle_asset: AssetId,
-    /// Contract hash used for this contract if specified
-    pub contract_hash: ContractHash,
+    /// Contract hash used for this crt asset
+    pub crt_contract_hash: ContractHash,
+    /// Contract hash used for this crt asset
+    pub ort_contract_hash: ContractHash,
 }
 
 impl BaseParams {
@@ -44,7 +46,11 @@ impl BaseParams {
         self.strike_price.consensus_encode(&mut writer).unwrap();
         self.coll_asset.consensus_encode(&mut writer).unwrap();
         self.settle_asset.consensus_encode(&mut writer).unwrap();
-        self.contract_hash
+        self.crt_contract_hash
+            .into_inner()
+            .consensus_encode(&mut writer)
+            .unwrap();
+        self.ort_contract_hash
             .into_inner()
             .consensus_encode(&mut writer)
             .unwrap();
@@ -62,7 +68,9 @@ impl BaseParams {
         let coll_asset = AssetId::consensus_decode(&mut reader).unwrap();
         let settle_asset = AssetId::consensus_decode(&mut reader).unwrap();
         let bytes = <[u8; 32]>::consensus_decode(&mut reader).unwrap();
-        let contract_hash = ContractHash::from_inner(bytes);
+        let crt_contract_hash = ContractHash::from_inner(bytes);
+        let bytes = <[u8; 32]>::consensus_decode(&mut reader).unwrap();
+        let ort_contract_hash = ContractHash::from_inner(bytes);
         Ok(Self {
             contract_size,
             expiry,
@@ -70,7 +78,8 @@ impl BaseParams {
             strike_price,
             coll_asset,
             settle_asset,
-            contract_hash: contract_hash,
+            crt_contract_hash,
+            ort_contract_hash,
         })
     }
 }
@@ -108,12 +117,16 @@ pub struct OptionsContract {
 impl OptionsContract {
     /// Creates a new [`OptionsContract`].
     pub fn new(params: BaseParams, crt_rt_prevout: OutPoint, ort_rt_prevout: OutPoint) -> Self {
-        // Versioning incase we want to update the scripts
-        let contract_hash = params.contract_hash;
-        let (crt_reissue_entropy, crt, crt_rt) =
-            new_issuance(crt_rt_prevout, contract_hash, /*confidential*/ false);
-        let (ort_reissue_entropy, ort, ort_rt) =
-            new_issuance(ort_rt_prevout, contract_hash, /*confidential*/ false);
+        let (crt_reissue_entropy, crt, crt_rt) = new_issuance(
+            crt_rt_prevout,
+            params.crt_contract_hash,
+            /*confidential*/ false,
+        );
+        let (ort_reissue_entropy, ort, ort_rt) = new_issuance(
+            ort_rt_prevout,
+            params.ort_contract_hash,
+            /*confidential*/ false,
+        );
         // unspendable key = lift_x(Hash(ser(G)))
         let unspend_key = bitcoin::XOnlyPublicKey::from_str(
             "50929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac0",
@@ -374,7 +387,8 @@ mod tests {
                 "cc4b500625764881971716718c9305da17363e4e97b6bcd26b30c9627dbe3868",
             )
             .unwrap(), //
-            contract_hash: ContractHash::hash("test".as_bytes()),
+            crt_contract_hash: ContractHash::hash("test".as_bytes()),
+            ort_contract_hash: ContractHash::hash("test2".as_bytes()),
         };
         let crt_rt_issue_prevout = OutPoint {
             txid: Txid::from_str(

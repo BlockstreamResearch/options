@@ -411,7 +411,10 @@ impl OptionsExt for Pset {
         let dest_spk = fund_desc.script_pubkey();
 
         // To avoid dedup for repeated code for ort/crt assets.
-        let arr = [(0, contract.crt_rt()), (1, contract.ort_rt())];
+        let arr = [
+            (0, contract.crt_rt(), contract.params().crt_contract_hash),
+            (1, contract.ort_rt(), contract.params().ort_contract_hash),
+        ];
 
         // Add issuance information with one explicit value
         // Create tokens with 0 asset amount and 1 token amount
@@ -423,13 +426,12 @@ impl OptionsExt for Pset {
 
             self.inputs_mut()[i].issuance_value_amount = None;
             self.inputs_mut()[i].issuance_inflation_keys = Some(1);
-            self.inputs_mut()[i].issuance_asset_entropy =
-                Some(contract.params().contract_hash.into_inner());
+            self.inputs_mut()[i].issuance_asset_entropy = Some(arr[i].2.into_inner());
         }
 
         let mut offset_vbf = ValueBlindingFactor::zero();
         let surject_inp = self.surjection_inputs(&HashMap::new())?;
-        for (_i, asset_id) in arr {
+        for (_i, asset_id, _) in arr {
             let out_abf = AssetBlindingFactor::one();
             let exp_asset = Asset::Explicit(asset_id);
             let (conf_asset, prf) = exp_asset
